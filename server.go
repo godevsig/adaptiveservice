@@ -10,9 +10,10 @@ import (
 // Server provides services.
 type Server struct {
 	*conf
-	publisher  string
-	providerID string
-	listenPort string
+	publisher        string
+	providerID       string
+	bcastPort        string
+	rootRegistryPort string
 	//sync.Mutex
 	//msgType2SrvName  map[reflect.Type]string
 	//srvName2MsgTypes map[string][]reflect.Type
@@ -54,8 +55,8 @@ func genID() string {
 }
 
 func (s *Server) init() {
-	addSigCloser(s)
 	initSigCleaner(s.lg)
+	addSigCloser(s)
 	s.mq = newMsgQ(s.qWeight, s.qScale, s.lg)
 	s.addCloser(s.mq)
 
@@ -92,11 +93,11 @@ func (s *Server) init() {
 				return
 			}
 
-			if len(s.listenPort) != 0 {
+			if len(s.bcastPort) != 0 {
 				if err := s.publishLANRegistryService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified listening port : %s, run LAN registry service", s.listenPort)
+				s.lg.Infof("user specified broadcast port : %s, run LAN registry service", s.bcastPort)
 			} else {
 				s.lg.Warnf("LAN registry not configured")
 			}
@@ -105,6 +106,11 @@ func (s *Server) init() {
 
 	if s.scope&ScopeWAN == ScopeWAN {
 		s.lg.Infoln("configing server in public network scope")
+		if len(s.rootRegistryPort) != 0 {
+			if err := s.runRootRegistry(); err != nil {
+				panic(err)
+			}
+		}
 		if addr, err := discoverRegistryAddr(); err != nil {
 			if len(s.registryAddr) != 0 {
 				if err := s.publishRegistryInfoService(); err != nil {
@@ -227,8 +233,7 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 		s.addCloser(tran)
 	}
 	if scope&ScopeLAN == ScopeLAN || scope&ScopeWAN == ScopeWAN {
-
-		tran, err := svc.newTCPTransport()
+		tran, err := svc.newTCPTransport("")
 		if err != nil {
 			return err
 		}

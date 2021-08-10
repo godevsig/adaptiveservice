@@ -35,8 +35,11 @@ func (svc *service) newUDSTransport() (*streamTransport, error) {
 	return st, nil
 }
 
-func (svc *service) newTCPTransport() (*streamTransport, error) {
-	lnr, err := net.Listen("tcp", ":0")
+func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
+	if len(onPort) == 0 {
+		onPort = "0"
+	}
+	lnr, err := net.Listen("tcp", ":"+onPort)
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +52,7 @@ func (svc *service) newTCPTransport() (*streamTransport, error) {
 	go st.receiver()
 	_, port, _ := net.SplitHostPort(lnr.Addr().String()) // from [::]:43807
 	if svc.scope&ScopeLAN == ScopeLAN {
-		if err := regServiceLAN(svc.publisherName, svc.serviceName, svc.s.providerID, port); err != nil {
+		if err := regServiceLAN(svc.publisherName, svc.serviceName, port); err != nil {
 			svc.s.lg.Warnf("service %s %s with provider %s register to LAN failed: %v", svc.publisherName, svc.serviceName, svc.s.providerID, err)
 		}
 	}

@@ -44,6 +44,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -195,4 +196,34 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 	RegisterType(errors.New(""))
 	RegisterType(fmt.Errorf("%w", io.EOF))
+}
+
+// test if pattern matches str
+//   "*" matches all
+//  "*bar*" matches bar, foobar, or foobarabc
+//  "foo*abc*" matches foobarabc, foobarabc123, or fooabc
+func wildcardMatch(pattern, str string) bool {
+	if len(pattern) == 0 {
+		return false
+	}
+	strs := strings.Split(pattern, "*")
+	var pos, index int
+	if index = strings.Index(str, strs[0]); index != 0 {
+		return false
+	}
+	end := strs[len(strs)-1]
+	if index = strings.LastIndex(str, end); index+len(end) != len(str) {
+		return false
+	}
+	for i, substr := range strs {
+		if i == 0 || i == len(strs)-1 || len(substr) == 0 {
+			continue
+		}
+		index = strings.Index(str[pos:], substr)
+		if index == -1 {
+			return false
+		}
+		pos += index + len(substr)
+	}
+	return true
 }

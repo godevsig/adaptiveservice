@@ -3,6 +3,8 @@ package adaptiveservice
 import (
 	"net"
 	"os"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,7 +50,7 @@ func lookupServiceUDS(publisherName, serviceName string) (addr string) {
 	return filename
 }
 
-func regServiceLAN(publisherName, serviceName, providerID, port string) error {
+func regServiceLAN(publisherName, serviceName, port string) error {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
 	defer c.Close()
 
@@ -57,11 +59,7 @@ func regServiceLAN(publisherName, serviceName, providerID, port string) error {
 		panic("LANRegistry not found")
 	}
 	defer conn.Close()
-	err := conn.SendRecv(&registerServiceForLAN{publisherName, serviceName, port}, nil)
-	if err != nil {
-		return err
-	}
-	return nil
+	return conn.SendRecv(&registerServiceForLAN{publisherName, serviceName, port}, nil)
 }
 
 func lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
@@ -73,7 +71,7 @@ func lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) 
 		panic("LANRegistry not found")
 	}
 	defer conn.Close()
-	var serviceInfos []serviceInfo
+	var serviceInfos []*serviceInfo
 	err := conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
 	if err != nil {
 		return
@@ -149,7 +147,7 @@ type registryLAN struct {
 }
 
 func (s *Server) newLANRegistry() (*registryLAN, error) {
-	packetConn, err := net.ListenPacket("udp4", ":"+s.listenPort)
+	packetConn, err := net.ListenPacket("udp4", ":"+s.bcastPort)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +158,7 @@ func (s *Server) newLANRegistry() (*registryLAN, error) {
 		ip, ipnet, _ := net.ParseCIDR(addr.String())
 		if ip.To4() != nil && !ip.IsLoopback() {
 			bcast := broadcastAddr(ipnet)
-			bcastAddr, _ := net.ResolveUDPAddr("udp4", bcast.String()+":"+s.listenPort)
+			bcastAddr, _ := net.ResolveUDPAddr("udp4", bcast.String()+":"+s.bcastPort)
 			il := &infoLAN{
 				ip:        ip,
 				ipnet:     ipnet,
@@ -198,6 +196,7 @@ func (r *registryLAN) broadcast(msg interface{}) error {
 }
 
 type serviceInfo struct {
+	name       string // "publisher_service"
 	providerID string
 	addr       string // "192.168.0.11:12345"
 }
@@ -276,7 +275,7 @@ func (r *registryLAN) run() {
 		prvds := r.serviceCache[cmd.name]
 		var serviceInfos []*serviceInfo
 		for providerID, addr := range prvds.table {
-			svcInfo := &serviceInfo{providerID, addr}
+			svcInfo := &serviceInfo{providerID: providerID, addr: addr}
 			serviceInfos = append(serviceInfos, svcInfo)
 		}
 		cmd.chanServiceInfo <- serviceInfos
@@ -340,11 +339,206 @@ func (r *registryLAN) close() {
 }
 
 func regServiceWAN(publisherName, serviceName, providerID, port string) error {
+	c := NewClient(WithScope(ScopeWAN))
+	c.init()
+	defer c.Close()
 
-	return nil
+	conn, err := c.newTCPConnection(c.registryAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	return conn.SendRecv(&regServiceInWAN{publisherName, serviceName, providerID, port}, nil)
+}
+
+// support wildcard
+func queryServiceWAN(publisherName, serviceName string) (serviceInfos []*serviceInfo) {
+	c := NewClient(WithScope(ScopeWAN))
+	c.init()
+	defer c.Close()
+
+	conn, err := c.newTCPConnection(c.registryAddr)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	conn.SendRecv(&queryServiceInWAN{publisherName, serviceName}, &serviceInfos)
+	return
+}
+
+func allServicesWAN() []*serviceInfo {
+	return queryServiceWAN("*", "*")
 }
 
 func lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
+	has := func(target string) bool {
+		if len(providerIDs) == 0 { // match all
+			return true
+		}
+		for _, str := range providerIDs {
+			if str == target {
+				return true
+			}
+		}
+		return false
+	}
 
+	serviceInfos := queryServiceWAN(publisherName, serviceName)
+	for _, provider := range serviceInfos {
+		if has(provider.providerID) {
+			addrs = append(addrs, provider.addr)
+		}
+	}
 	return
+}
+
+type providerInfo struct {
+	timeStamp time.Time
+	addr      string
+}
+
+type providerMap struct {
+	sync.RWMutex
+	providers map[string]*providerInfo
+}
+
+type rootRegistry struct {
+	sync.RWMutex
+	// "publisher_service": {"providerID1":{timeStamp, "192.168.0.11:12345"}, "providerID2":{timeStamp, "192.168.0.26:33556"}}
+	serviceMap map[string]*providerMap
+}
+
+func pingService(addr string) error {
+	conn, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return ErrServiceNotReachable
+	}
+	conn.Close()
+	return nil
+}
+
+// reply OK or ErrServiceNotReachable
+type regServiceInWAN struct {
+	publisher  string
+	service    string
+	providerID string
+	port       string
+}
+
+func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
+	rr := stream.GetContext().(*rootRegistry)
+	ss := stream.(*streamServerStream)
+	rhost, _, _ := net.SplitHostPort(ss.netconn.RemoteAddr().String())
+
+	name := msg.publisher + "_" + msg.service
+	rr.Lock()
+	pmap, has := rr.serviceMap[name]
+	if !has {
+		pmap = &providerMap{
+			providers: make(map[string]*providerInfo),
+		}
+	}
+	rr.Unlock()
+	raddr := rhost + msg.port
+	if err := pingService(raddr); err != nil {
+		return err
+	}
+	pinfo := &providerInfo{time.Now(), raddr}
+	pmap.Lock()
+	pmap.providers[msg.providerID] = pinfo
+	pmap.Unlock()
+	return OK
+}
+
+// reply []*serviceInfo
+// support wildcard(*) matching
+type queryServiceInWAN struct {
+	publisher string
+	service   string
+}
+
+func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
+	rr := stream.GetContext().(*rootRegistry)
+	name := msg.publisher + "_" + msg.service
+	var serviceInfos []*serviceInfo
+
+	walkProviderMap := func(service string, pmap *providerMap) {
+		pmap.RLock()
+		for pID, pInfo := range pmap.providers {
+			func() {
+				pmap.RUnlock()
+				defer pmap.RLock()
+				t := time.Now()
+				if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
+					if err := pingService(pInfo.addr); err != nil {
+						pmap.Lock()
+						delete(pmap.providers, pID)
+						pmap.Unlock()
+						return
+					}
+					pInfo.timeStamp = t
+				}
+				svcInfo := &serviceInfo{name: service, providerID: pID, addr: pInfo.addr}
+				serviceInfos = append(serviceInfos, svcInfo)
+			}()
+		}
+		pmap.RUnlock()
+	}
+
+	if strings.Contains(name, "*") {
+		rr.RLock()
+		for service, pmap := range rr.serviceMap {
+			rr.RUnlock()
+			if wildcardMatch(name, service) {
+				walkProviderMap(service, pmap)
+			}
+			rr.RLock()
+		}
+		rr.RUnlock()
+	} else {
+		rr.RLock()
+		pmap, has := rr.serviceMap[name]
+		rr.RUnlock()
+		if has {
+			walkProviderMap("", pmap)
+		}
+	}
+
+	return serviceInfos
+}
+
+func init() {
+	RegisterType((*regServiceInWAN)(nil))
+	RegisterType((*queryServiceInWAN)(nil))
+}
+
+func (s *Server) runRootRegistry() error {
+	if len(s.rootRegistryPort) == 0 {
+		panic("no rootRegistryPort")
+	}
+	svc := &service{
+		publisherName: "godevsig",
+		serviceName:   "rootRegistry",
+		knownMsgTypes: make(map[reflect.Type]struct{}),
+		s:             s,
+		scope:         ScopeWAN,
+	}
+	svc.knownMsgTypes[reflect.TypeOf((*regServiceInWAN)(nil))] = struct{}{}
+	svc.knownMsgTypes[reflect.TypeOf((*queryServiceInWAN)(nil))] = struct{}{}
+
+	rr := &rootRegistry{
+		serviceMap: make(map[string]*providerMap),
+	}
+	svc.fnOnNewStream = func(ctx Context) error {
+		ctx.SetContext(rr)
+		return nil
+	}
+	tran, err := svc.newTCPTransport(s.rootRegistryPort)
+	if err != nil {
+		return err
+	}
+	s.addCloser(tran)
+	return nil
 }

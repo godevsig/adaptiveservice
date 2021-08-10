@@ -32,3 +32,15 @@ func (s *Server) DisableMsgTypeCheck() *Server {
 	s.msgTypeCheck = false
 	return s
 }
+
+// SetBroadcastPort sets the broadcast port used by lan registry.
+func (s *Server) SetBroadcastPort(port string) *Server {
+	s.bcastPort = port
+	return s
+}
+
+// EnableRootRegistry makes the server become root registry.
+func (s *Server) EnableRootRegistry(port string) *Server {
+	s.rootRegistryPort = port
+	return s
+}

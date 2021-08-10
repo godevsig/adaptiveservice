@@ -75,7 +75,7 @@ func discoverProviderID() (id string, err error) {
 // publishLANRegistryService declares the LAN registry service,
 // which provides service publishing and discovery service in LAN network.
 func (s *Server) publishLANRegistryService() error {
-	if len(s.listenPort) == 0 {
+	if len(s.bcastPort) == 0 {
 		panic("listening port not specified")
 	}
 
