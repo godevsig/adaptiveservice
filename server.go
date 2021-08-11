@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"reflect"
 )
 
@@ -14,24 +15,20 @@ type Server struct {
 	providerID       string
 	bcastPort        string
 	rootRegistryPort string
-	//sync.Mutex
-	//msgType2SrvName  map[reflect.Type]string
-	//srvName2MsgTypes map[string][]reflect.Type
-	errRecovers  chan errorRecover
-	mq           *msgQ
-	qWeight      int
-	qScale       int
-	msgTypeCheck bool
-	closers      []closer
+	reverseProxy     bool
+	errRecovers      chan errorRecover
+	mq               *msgQ
+	qWeight          int
+	qScale           int
+	msgTypeCheck     bool
+	closers          []closer
 }
 
 // NewServer creates a server which publishes services.
 func NewServer(options ...Option) *Server {
 	s := &Server{
-		conf:      newConf(),
-		publisher: "default.org",
-		//msgType2SrvName:  make(map[reflect.Type]string),
-		//srvName2MsgTypes: make(map[string][]reflect.Type),
+		conf:         newConf(),
+		publisher:    "default.org",
 		errRecovers:  make(chan errorRecover),
 		qWeight:      8,
 		qScale:       8,
@@ -84,8 +81,6 @@ func (s *Server) init() {
 		s.lg.Infoln("configing server in local network scope")
 		func() {
 			c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
-			defer c.Close()
-
 			conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 			if conn != nil {
 				conn.Close()
@@ -107,7 +102,7 @@ func (s *Server) init() {
 	if s.scope&ScopeWAN == ScopeWAN {
 		s.lg.Infoln("configing server in public network scope")
 		if len(s.rootRegistryPort) != 0 {
-			if err := s.runRootRegistry(); err != nil {
+			if err := s.startRootRegistry(); err != nil {
 				panic(err)
 			}
 		}
@@ -128,38 +123,32 @@ func (s *Server) init() {
 			s.lg.Infof("discovered registry address: %s", addr)
 		}
 	}
+
+	if s.reverseProxy {
+		scope := ScopeLAN
+		if len(s.rootRegistryPort) != 0 {
+			scope |= ScopeWAN
+		}
+		if s.scope&scope != scope {
+			panic("scope error")
+		}
+		if err := s.publishReverseProxyService(scope); err != nil {
+			panic(err)
+		}
+		s.lg.Infoln("reverse proxy started")
+	}
 	s.lg.Debugln("server initialized")
 }
 
-/*
-var codingLock sync.Mutex
-
-func (s *Server) regKnownMessage(name string, msg KnownMessage) {
-	if s.scope > scopeProcess {
-		codingLock.Lock()
-		gotiny.Register(msg)
-		codingLock.Unlock()
-	}
-
-	tp := reflect.TypeOf(msg)
-	s.Lock()
-	if _, has := s.msgType2SrvName[tp]; has {
-		panic(fmt.Sprintf("registering duplicated type %v for %s", tp, name))
-	}
-	s.msgType2SrvName[tp] = name
-	tps := s.srvName2MsgTypes[name]
-	s.srvName2MsgTypes[name] = append(tps, tp)
-	s.Unlock()
-}
-*/
-
 type service struct {
-	publisherName string
-	serviceName   string
-	knownMsgTypes map[reflect.Type]struct{}
-	s             *Server
-	scope         Scope
-	fnOnNewStream OnNewStream
+	publisherName     string
+	serviceName       string
+	providerID        string
+	knownMsgTypes     map[reflect.Type]struct{}
+	s                 *Server
+	scope             Scope
+	fnOnNewStream     func(Context)
+	fnOnNewConnection func(net.Conn) bool
 }
 
 func (svc *service) canHandle(msg interface{}) bool {
@@ -170,17 +159,25 @@ func (svc *service) canHandle(msg interface{}) bool {
 	return true
 }
 
-// OnNewStream is called to initialize the context
-// when new incoming stream is accepted.
-type OnNewStream func(ctx Context) error
-
 // ServiceOption is option for service.
 type ServiceOption func(*service)
 
-// WithOnNewStreamFunc sets OnNewStream function.
-func WithOnNewStreamFunc(fn OnNewStream) ServiceOption {
+// OnNewStreamFunc sets a function which is called to initialize
+// the context when new incoming stream is accepted.
+func OnNewStreamFunc(fn func(Context)) ServiceOption {
 	return func(svc *service) {
 		svc.fnOnNewStream = fn
+	}
+}
+
+// OnNewConnectionFunc sets a function which is called when new
+// incoming stream connection is established.
+// The following message dispaching on this connection will stop
+// if fn returns true, leaving the connection NOT closed.
+// Only works for stream transport.
+func OnNewConnectionFunc(fn func(net.Conn) bool) ServiceOption {
+	return func(svc *service) {
+		svc.fnOnNewConnection = fn
 	}
 }
 
@@ -189,19 +186,13 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 		svc := &service{
 			publisherName: publisherName,
 			serviceName:   serviceName,
+			providerID:    s.providerID,
 			knownMsgTypes: make(map[reflect.Type]struct{}),
 			s:             s,
 			scope:         scope,
 		}
 
 		for _, msg := range knownMessages {
-			/*
-				if s.scope&ScopeProcess != ScopeProcess {
-					codingLock.Lock()
-					gotiny.Register(msg)
-					codingLock.Unlock()
-				}
-			*/
 			tp := reflect.TypeOf(msg)
 			svc.knownMsgTypes[tp] = struct{}{}
 		}

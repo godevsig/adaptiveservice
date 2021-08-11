@@ -44,3 +44,9 @@ func (s *Server) EnableRootRegistry(port string) *Server {
 	s.rootRegistryPort = port
 	return s
 }
+
+// EnableReverseProxy enables reverse proxy.
+func (s *Server) EnableReverseProxy() *Server {
+	s.reverseProxy = true
+	return s
+}

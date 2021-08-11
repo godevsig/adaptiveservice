@@ -50,22 +50,18 @@ func lookupServiceUDS(publisherName, serviceName string) (addr string) {
 	return filename
 }
 
-func regServiceLAN(publisherName, serviceName, port string) error {
+func regServiceLAN(svc *service, port string) error {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
-	defer c.Close()
-
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 	if conn == nil {
 		panic("LANRegistry not found")
 	}
 	defer conn.Close()
-	return conn.SendRecv(&registerServiceForLAN{publisherName, serviceName, port}, nil)
+	return conn.SendRecv(&registerServiceForLAN{svc.publisherName, svc.serviceName, port}, nil)
 }
 
 func lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
-	defer c.Close()
-
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 	if conn == nil {
 		panic("LANRegistry not found")
@@ -338,26 +334,21 @@ func (r *registryLAN) close() {
 	r.done = nil
 }
 
-func regServiceWAN(publisherName, serviceName, providerID, port string) error {
+func regServiceWAN(svc *service, port string) error {
 	c := NewClient(WithScope(ScopeWAN))
 	c.init()
-	defer c.Close()
-
 	conn, err := c.newTCPConnection(c.registryAddr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-
-	return conn.SendRecv(&regServiceInWAN{publisherName, serviceName, providerID, port}, nil)
+	return conn.SendRecv(&regServiceInWAN{svc.publisherName, svc.serviceName, svc.providerID, port}, nil)
 }
 
 // support wildcard
 func queryServiceWAN(publisherName, serviceName string) (serviceInfos []*serviceInfo) {
 	c := NewClient(WithScope(ScopeWAN))
 	c.init()
-	defer c.Close()
-
 	conn, err := c.newTCPConnection(c.registryAddr)
 	if err != nil {
 		return
@@ -514,13 +505,14 @@ func init() {
 	RegisterType((*queryServiceInWAN)(nil))
 }
 
-func (s *Server) runRootRegistry() error {
+func (s *Server) startRootRegistry() error {
 	if len(s.rootRegistryPort) == 0 {
 		panic("no rootRegistryPort")
 	}
 	svc := &service{
 		publisherName: "godevsig",
 		serviceName:   "rootRegistry",
+		providerID:    s.providerID,
 		knownMsgTypes: make(map[reflect.Type]struct{}),
 		s:             s,
 		scope:         ScopeWAN,
@@ -531,9 +523,8 @@ func (s *Server) runRootRegistry() error {
 	rr := &rootRegistry{
 		serviceMap: make(map[string]*providerMap),
 	}
-	svc.fnOnNewStream = func(ctx Context) error {
+	svc.fnOnNewStream = func(ctx Context) {
 		ctx.SetContext(rr)
-		return nil
 	}
 	tran, err := svc.newTCPTransport(s.rootRegistryPort)
 	if err != nil {

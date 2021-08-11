@@ -139,9 +139,7 @@ func (conn *chanConnection) NewStream() Stream {
 	}
 
 	if conn.ct.svc.fnOnNewStream != nil {
-		if err := conn.ct.svc.fnOnNewStream(cs.ctx); err != nil {
-			conn.ct.svc.s.lg.Warnln("server failed to init stream context: ", err)
-		}
+		conn.ct.svc.fnOnNewStream(cs.ctx)
 	}
 	return cs
 }

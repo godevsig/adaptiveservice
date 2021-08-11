@@ -1,5 +1,10 @@
 package adaptiveservice
 
+import (
+	"io"
+	"net"
+)
+
 const (
 	// BuiltinPublisher name
 	BuiltinPublisher = "builtin"
@@ -30,8 +35,6 @@ func (msg *reqRegistryInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverRegistryAddr() (addr string, err error) {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
-	defer c.Close()
-
 	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "registryInfo")
 	if conn != nil {
@@ -61,8 +64,6 @@ func (msg *reqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverProviderID() (id string, err error) {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
-	defer c.Close()
-
 	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "providerInfo")
 	if conn != nil {
@@ -88,9 +89,8 @@ func (s *Server) publishLANRegistryService() error {
 	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*registerServiceForLAN)(nil)}
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, "LANRegistry",
 		knownMsgs,
-		WithOnNewStreamFunc(func(ctx Context) error {
+		OnNewStreamFunc(func(ctx Context) {
 			ctx.SetContext(registry)
-			return nil
 		}))
 }
 
@@ -118,9 +118,71 @@ func (msg *registerServiceForLAN) Handle(stream ContextStream) (reply interface{
 	return OK
 }
 
+// publishReverseProxyService declares the reverse proxy service.
+func (s *Server) publishReverseProxyService(scope Scope) error {
+	knownMsgs := []KnownMessage{(*proxyRegServiceInWAN)(nil)}
+	return s.publish(scope, BuiltinPublisher, "reverseProxy",
+		knownMsgs,
+		OnNewStreamFunc(func(ctx Context) {
+			ctx.SetContext(s)
+		}))
+}
+
+type proxyRegServiceInWAN regServiceInWAN
+
+func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
+	s := stream.GetContext().(*Server)
+	chanServerConn := make(chan net.Conn)
+
+	onNewServerConnection := func(netconn net.Conn) bool {
+		chanServerConn <- netconn
+		return true
+	}
+
+	reversesvc := &service{
+		s:                 s,
+		fnOnNewConnection: onNewServerConnection,
+	}
+	reversetran, err := reversesvc.newTCPTransport("")
+	if err != nil {
+		return err
+	}
+	s.addCloser(reversetran)
+	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
+
+	onNewClientConnection := func(clientConn net.Conn) bool {
+		if err := stream.Send(port); err != nil {
+			clientConn.Close()
+			return true
+		}
+		serverConn := <-chanServerConn
+		go io.Copy(serverConn, clientConn)
+		go io.Copy(clientConn, serverConn)
+		return true
+	}
+
+	proxysvc := &service{
+		publisherName:     msg.publisher,
+		serviceName:       msg.service,
+		providerID:        msg.providerID,
+		s:                 s,
+		scope:             ScopeWAN,
+		fnOnNewConnection: onNewClientConnection,
+	}
+
+	proxytran, err := proxysvc.newTCPTransport("")
+	if err != nil {
+		return err
+	}
+	s.addCloser(proxytran)
+
+	return OK
+}
+
 func init() {
 	RegisterType((*reqRegistryInfo)(nil))
 	RegisterType((*reqProviderInfo)(nil))
 	RegisterType((*queryServiceInLAN)(nil))
 	RegisterType((*registerServiceForLAN)(nil))
+	RegisterType((*proxyRegServiceInWAN)(nil))
 }

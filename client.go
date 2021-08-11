@@ -148,11 +148,14 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		defer close(connections)
 		found := 0
 		timeout := c.discoverTimeout
-		for found == 0 && timeout != 0 {
+		for found == 0 {
 			if found += findWithinOS(); found == expect {
 				break
 			}
 			if found += findNetwork(expect - found); found == expect {
+				break
+			}
+			if timeout == 0 {
 				break
 			}
 			time.Sleep(time.Second)
@@ -161,9 +164,4 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 	}()
 
 	return connections
-}
-
-// Close closes the client.
-func (c *Client) Close() error {
-	return nil
 }

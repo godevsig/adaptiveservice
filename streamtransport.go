@@ -11,9 +11,11 @@ import (
 )
 
 type streamTransport struct {
-	svc  *service
-	done chan struct{}
-	lnr  net.Listener
+	svc              *service
+	done             chan struct{}
+	lnr              net.Listener
+	reverseProxyConn Connection
+	chanNetConn      chan net.Conn
 }
 
 func (svc *service) newUDSTransport() (*streamTransport, error) {
@@ -45,21 +47,39 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	}
 
 	st := &streamTransport{
-		svc:  svc,
-		done: make(chan struct{}),
-		lnr:  lnr,
+		svc:         svc,
+		done:        make(chan struct{}),
+		lnr:         lnr,
+		chanNetConn: make(chan net.Conn, 8),
 	}
 	go st.receiver()
 	_, port, _ := net.SplitHostPort(lnr.Addr().String()) // from [::]:43807
 	if svc.scope&ScopeLAN == ScopeLAN {
-		if err := regServiceLAN(svc.publisherName, svc.serviceName, port); err != nil {
-			svc.s.lg.Warnf("service %s %s with provider %s register to LAN failed: %v", svc.publisherName, svc.serviceName, svc.s.providerID, err)
+		if err := regServiceLAN(svc, port); err != nil {
+			svc.s.lg.Warnf("service %s %s register to LAN failed: %v", svc.publisherName, svc.serviceName, err)
+			st.close()
+			return nil, err
 		}
 	}
 
 	if svc.scope&ScopeWAN == ScopeWAN {
-		if err := regServiceWAN(svc.publisherName, svc.serviceName, svc.s.providerID, port); err != nil {
-			svc.s.lg.Warnf("service %s %s with provider %s register to WAN failed: %v", svc.publisherName, svc.serviceName, svc.s.providerID, err)
+		if err := regServiceWAN(svc, port); err != nil {
+			svc.s.lg.Infof("service %s %s can not register to WAN directly: %v", svc.publisherName, svc.serviceName, err)
+			c := NewClient(WithScope(ScopeLAN | ScopeWAN)).SetDiscoverTimeout(0)
+			connChan := c.Discover(BuiltinPublisher, "reverseProxy", "*")
+			for conn := range connChan {
+				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID, port}, nil)
+				if err == nil {
+					st.reverseProxyConn = conn
+					go st.reverseReceiver()
+					break
+				}
+			}
+			if st.reverseProxyConn == nil {
+				svc.s.lg.Warnf("service %s %s register to proxy failed", svc.publisherName, svc.serviceName)
+				st.close()
+				return nil, err
+			}
 		}
 	}
 	return st, nil
@@ -67,6 +87,9 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 
 func (st *streamTransport) close() {
 	st.lnr.Close()
+	if st.reverseProxyConn != nil {
+		st.reverseProxyConn.Close()
+	}
 	close(st.done)
 	st.done = nil
 }
@@ -140,17 +163,54 @@ func (ss *streamServerStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}
 	return nil
 }
 
+func (st *streamTransport) reverseReceiver() {
+	cmdConn := st.reverseProxyConn
+	defer cmdConn.Close()
+	conn := cmdConn.(*streamConnection)
+	host, _, _ := net.SplitHostPort(conn.netconn.RemoteAddr().String()) // from [::]:43807
+
+	for {
+		var port string
+		if err := cmdConn.Recv(&port); err != nil {
+			break
+		}
+		netconn, err := net.Dial("tcp", host+":"+port)
+		if err != nil {
+			break
+		}
+		st.chanNetConn <- netconn
+	}
+}
+
 func (st *streamTransport) receiver() {
 	lg := st.svc.s.lg
 	mq := st.svc.s.mq
 	lnr := st.lnr
+
+	go func() {
+		for {
+			netconn, err := lnr.Accept()
+			if err != nil {
+				st.svc.s.errRecovers <- unrecoverableError{err}
+				return
+			}
+			st.chanNetConn <- netconn
+		}
+	}()
+
 	for {
-		netconn, err := lnr.Accept()
-		if err != nil {
-			st.svc.s.errRecovers <- unrecoverableError{err}
-			break
+		var netconn net.Conn
+		select {
+		case <-st.done:
+			return
+		case netconn = <-st.chanNetConn:
 		}
 		go func() {
+			if st.svc.fnOnNewConnection != nil {
+				if st.svc.fnOnNewConnection(netconn) {
+					return
+				}
+			}
 			defer netconn.Close()
 			ssMap := make(map[uint64]*streamServerStream)
 			dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
@@ -196,9 +256,7 @@ func (st *streamTransport) receiver() {
 					}
 					ssMap[tm.srcChan] = ss
 					if st.svc.fnOnNewStream != nil {
-						if err := st.svc.fnOnNewStream(ss); err != nil {
-							lg.Errorln("server failed to init stream context: ", err)
-						}
+						st.svc.fnOnNewStream(ss)
 					}
 				}
 
