@@ -100,16 +100,43 @@ type Logger interface {
 	Errorln(args ...interface{})
 }
 
-type null struct{}
+type loggerNull struct{}
 
-func (null) Debugf(format string, args ...interface{}) {}
-func (null) Debugln(args ...interface{})               {}
-func (null) Infof(format string, args ...interface{})  {}
-func (null) Infoln(args ...interface{})                {}
-func (null) Warnf(format string, args ...interface{})  {}
-func (null) Warnln(args ...interface{})                {}
-func (null) Errorf(format string, args ...interface{}) {}
-func (null) Errorln(args ...interface{})               {}
+func (loggerNull) Debugf(format string, args ...interface{}) {}
+func (loggerNull) Debugln(args ...interface{})               {}
+func (loggerNull) Infof(format string, args ...interface{})  {}
+func (loggerNull) Infoln(args ...interface{})                {}
+func (loggerNull) Warnf(format string, args ...interface{})  {}
+func (loggerNull) Warnln(args ...interface{})                {}
+func (loggerNull) Errorf(format string, args ...interface{}) {}
+func (loggerNull) Errorln(args ...interface{})               {}
+
+// LoggerAll prints all regardless of loglevel
+type LoggerAll struct{}
+
+// Debugf is Debugf
+func (LoggerAll) Debugf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+
+// Debugln is Debugln
+func (LoggerAll) Debugln(args ...interface{}) { fmt.Println(args...) }
+
+// Infof is Infof
+func (LoggerAll) Infof(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+
+// Infoln is Infoln
+func (LoggerAll) Infoln(args ...interface{}) { fmt.Println(args...) }
+
+// Warnf is Warnf
+func (LoggerAll) Warnf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+
+// Warnln is Warnln
+func (LoggerAll) Warnln(args ...interface{}) { fmt.Println(args...) }
+
+// Errorf is Errorf
+func (LoggerAll) Errorf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
+
+// Errorln is Errorln
+func (LoggerAll) Errorln(args ...interface{}) { fmt.Println(args...) }
 
 type errorRecover interface {
 	Error() error

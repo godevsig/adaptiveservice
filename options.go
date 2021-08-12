@@ -1,12 +1,10 @@
 package adaptiveservice
 
 import (
-	"context"
 	"sync"
 )
 
 type conf struct {
-	ctx          context.Context
 	lg           Logger
 	registryAddr string
 	scope        Scope
@@ -16,8 +14,7 @@ type conf struct {
 
 func newConf() *conf {
 	return &conf{
-		ctx:   context.Background(),
-		lg:    null{},
+		lg:    loggerNull{},
 		scope: ScopeAll,
 		qsize: 128,
 	}
@@ -25,13 +22,6 @@ func newConf() *conf {
 
 // Option is option to be set.
 type Option func(*conf)
-
-// WithContext sets the cancelable context.
-func WithContext(ctx context.Context) Option {
-	return func(c *conf) {
-		c.ctx = ctx
-	}
-}
 
 // WithLogger sets the logger.
 func WithLogger(lg Logger) Option {
