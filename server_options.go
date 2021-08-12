@@ -1,5 +1,7 @@
 package adaptiveservice
 
+import "strings"
+
 // SetProviderID sets the provider ID for this server.
 // Provider ID identifies the service in the network where there are
 // multiple publisher_service instances found in the registry.
@@ -10,9 +12,12 @@ func (s *Server) SetProviderID(id string) *Server {
 }
 
 // SetPublisher declares the publisher of the server, which for example
-// is usually an organization name.
-// Default is "default.org"
+// is usually an organization name. The name should not contain "_" or "/".
+// Default is "default.org".
 func (s *Server) SetPublisher(publisher string) *Server {
+	if strings.ContainsAny(publisher, "_/") {
+		panic("publisher should not contain _ or /")
+	}
 	s.publisher = publisher
 	return s
 }
@@ -48,5 +53,12 @@ func (s *Server) EnableRootRegistry(port string) *Server {
 // EnableReverseProxy enables reverse proxy.
 func (s *Server) EnableReverseProxy() *Server {
 	s.reverseProxy = true
+	return s
+}
+
+// EnableServiceLister enables lister service which can list
+// available services.
+func (s *Server) EnableServiceLister() *Server {
+	s.serviceLister = true
 	return s
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 )
 
 // Server provides services.
@@ -16,6 +17,7 @@ type Server struct {
 	bcastPort        string
 	rootRegistryPort string
 	reverseProxy     bool
+	serviceLister    bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
 	qWeight          int
@@ -240,6 +242,9 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 // where (*PublicStructA) and (*PublicStructB) are the known messages that
 // have Handle(stream ContextStream) (reply interface{}, err error) method.
 func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
+	if strings.ContainsAny(serviceName, "_/") {
+		panic("serviceName should not contain _ or /")
+	}
 	return s.publish(s.scope, s.publisher, serviceName, knownMessages, options...)
 }
 

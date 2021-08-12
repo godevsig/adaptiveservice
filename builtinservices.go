@@ -3,6 +3,7 @@ package adaptiveservice
 import (
 	"io"
 	"net"
+	"strings"
 )
 
 const (
@@ -94,7 +95,7 @@ func (s *Server) publishLANRegistryService() error {
 		}))
 }
 
-// reply with []*serviceInfo
+// reply with []*ServiceInfo
 type queryServiceInLAN struct {
 	publisher string
 	service   string
@@ -179,10 +180,48 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	return OK
 }
 
+// ListService lists all services matching name which can
+// be wildcard:
+//   "*" matches all
+//  "*bar*" matches bar, foobar, or foobarabc
+//  "foo*abc*" matches foobarabc, foobarabc123, or fooabc
+// "abc.org_echo.v1.0" matches exactly the service whose publisher
+// is "abc.org" and service is "echo.v1.0"
+//
+// Only at most one "_" is allowed.
+// The reply is []*ServiceInfo
+type ListService struct {
+	name string
+}
+
+// Handle handles ListService message.
+func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
+	var serviceInfos []*ServiceInfo
+
+	publisher, service := msg.name, msg.name
+	if strings.Contains(msg.name, "_") {
+		strs := strings.Split(msg.name, "_")
+		publisher, service = strs[0], strs[1]
+	}
+
+	serviceInfos = append(serviceInfos, queryServiceProcess(publisher, service)...)
+	serviceInfos = append(serviceInfos, queryServiceOS(publisher, service)...)
+	serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service)...)
+	serviceInfos = append(serviceInfos, queryServiceWAN(publisher, service)...)
+	return serviceInfos
+}
+
+// publishServiceListerService declares the lister service.
+func (s *Server) publishServiceListerService(scope Scope) error {
+	knownMsgs := []KnownMessage{(*ListService)(nil)}
+	return s.publish(scope, BuiltinPublisher, "serviceLister", knownMsgs)
+}
+
 func init() {
 	RegisterType((*reqRegistryInfo)(nil))
 	RegisterType((*reqProviderInfo)(nil))
 	RegisterType((*queryServiceInLAN)(nil))
 	RegisterType((*registerServiceForLAN)(nil))
 	RegisterType((*proxyRegServiceInWAN)(nil))
+	RegisterType((*ListService)(nil))
 }

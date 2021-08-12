@@ -3,6 +3,7 @@ package adaptiveservice
 import (
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -35,11 +36,64 @@ func regServiceChan(publisherName, serviceName string, ct *chanTransport) {
 	chanRegistry.table[name] = ct
 }
 
+// support wildcard
+func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
+	name := publisherName + "_" + serviceName
+	if strings.Contains(name, "*") {
+		chanRegistry.RLock()
+		for ctname := range chanRegistry.table {
+			chanRegistry.RUnlock()
+			if wildcardMatch(name, ctname) {
+				strs := strings.Split(ctname, "_")
+				sInfo := &ServiceInfo{strs[0], strs[1], "self", "internal"}
+				serviceInfos = append(serviceInfos, sInfo)
+			}
+			chanRegistry.RLock()
+		}
+		chanRegistry.RUnlock()
+	} else {
+		chanRegistry.RLock()
+		ct := chanRegistry.table[name]
+		chanRegistry.RUnlock()
+		if ct != nil {
+			sInfo := &ServiceInfo{publisherName, serviceName, "self", "internal"}
+			serviceInfos = append(serviceInfos, sInfo)
+		}
+	}
+	return
+}
+
 func lookupServiceChan(publisherName, serviceName string) *chanTransport {
 	name := publisherName + "_" + serviceName
 	chanRegistry.RLock()
 	defer chanRegistry.RUnlock()
 	return chanRegistry.table[name]
+}
+
+// support wildcard
+func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
+	name := publisherName + "_" + serviceName
+	if strings.Contains(name, "*") {
+		sockets, _ := filepath.Glob(udsRegistryDir + "*_*.sock")
+		for _, socket := range sockets {
+			s := strings.TrimPrefix(socket, udsRegistryDir)
+			s = strings.TrimSuffix(s, ".sock")
+			strs := strings.Split(s, "_")
+			if wildcardMatch(name, s) {
+				sInfo := &ServiceInfo{strs[0], strs[1], "self", socket}
+				serviceInfos = append(serviceInfos, sInfo)
+			}
+		}
+	} else {
+		socket := udsRegistryDir + name + ".sock"
+		if _, err := os.Stat(socket); os.IsNotExist(err) {
+			return
+		}
+		sInfo := &ServiceInfo{publisherName, serviceName, "self", socket}
+		serviceInfos = append(serviceInfos, sInfo)
+	}
+
+	return
 }
 
 func lookupServiceUDS(publisherName, serviceName string) (addr string) {
@@ -60,18 +114,19 @@ func regServiceLAN(svc *service, port string) error {
 	return conn.SendRecv(&registerServiceForLAN{svc.publisherName, svc.serviceName, port}, nil)
 }
 
-func lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
+// support wildcard
+func queryServiceLAN(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
-	if conn == nil {
-		panic("LANRegistry not found")
+	if conn != nil {
+		defer conn.Close()
+		conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
 	}
-	defer conn.Close()
-	var serviceInfos []*serviceInfo
-	err := conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
-	if err != nil {
-		return
-	}
+	return
+}
+
+func lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
+	serviceInfos := queryServiceLAN(publisherName, serviceName)
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
@@ -125,21 +180,22 @@ type packetMsg struct {
 	raddr net.Addr
 }
 
+type providerInfo struct {
+	timeStamp time.Time
+	addr      string
+}
+
 type providers struct {
-	timeStamp time.Time         // last update time
-	table     map[string]string // {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}
+	timeStamp time.Time                // last update time
+	table     map[string]*providerInfo // {"providerID1":{time, "192.168.0.11:12345"}, {time, "providerID2":"192.168.0.26:33556"}}
 }
 
 type registryLAN struct {
-	s                 *Server
-	packetConn        net.PacketConn
-	infoLANs          []*infoLAN
-	done              chan struct{}
-	cmdChan           chan interface{}
-	packetChan        chan *packetMsg
-	localServiceTable map[string]string // "publisher_service": "12345"
-	// "publisher_service": {time.Time, {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}}
-	serviceCache map[string]*providers
+	s          *Server
+	packetConn net.PacketConn
+	infoLANs   []*infoLAN
+	done       chan struct{}
+	cmdChan    chan interface{}
 }
 
 func (s *Server) newLANRegistry() (*registryLAN, error) {
@@ -165,14 +221,11 @@ func (s *Server) newLANRegistry() (*registryLAN, error) {
 	}
 
 	r := &registryLAN{
-		s:                 s,
-		packetConn:        packetConn,
-		infoLANs:          infoLANs,
-		done:              make(chan struct{}),
-		cmdChan:           make(chan interface{}),
-		packetChan:        make(chan *packetMsg),
-		localServiceTable: make(map[string]string),
-		serviceCache:      make(map[string]*providers),
+		s:          s,
+		packetConn: packetConn,
+		infoLANs:   infoLANs,
+		done:       make(chan struct{}),
+		cmdChan:    make(chan interface{}),
 	}
 
 	go r.run()
@@ -182,7 +235,6 @@ func (s *Server) newLANRegistry() (*registryLAN, error) {
 // msg must be pointer
 func (r *registryLAN) broadcast(msg interface{}) error {
 	bufMsg := gotiny.Marshal(msg)
-
 	for _, lan := range r.infoLANs {
 		if _, err := r.packetConn.WriteTo(bufMsg, lan.bcastAddr); err != nil {
 			return err
@@ -191,8 +243,10 @@ func (r *registryLAN) broadcast(msg interface{}) error {
 	return nil
 }
 
-type serviceInfo struct {
-	name       string // "publisher_service"
+// ServiceInfo is service information.
+type ServiceInfo struct {
+	publisher  string
+	service    string
 	providerID string
 	addr       string // "192.168.0.11:12345"
 }
@@ -208,7 +262,7 @@ type foundInLAN struct {
 }
 
 func init() {
-	RegisterType(([]*serviceInfo)(nil))
+	RegisterType(([]*ServiceInfo)(nil))
 	RegisterType((*queryInLAN)(nil))
 	RegisterType((*foundInLAN)(nil))
 }
@@ -220,8 +274,7 @@ type cmdLANRegister struct {
 
 type cmdLANQuery struct {
 	name            string // "publisher_service"
-	interval        int    // in seconds
-	chanServiceInfo chan []*serviceInfo
+	chanServiceInfo chan []*ServiceInfo
 }
 
 func (r *registryLAN) registerServiceForLAN(publisher, service, port string) {
@@ -229,9 +282,10 @@ func (r *registryLAN) registerServiceForLAN(publisher, service, port string) {
 	r.cmdChan <- &cmdLANRegister{name, port}
 }
 
-func (r *registryLAN) queryServiceInLAN(publisher, service string) []*serviceInfo {
+// support wildcard
+func (r *registryLAN) queryServiceInLAN(publisher, service string) []*ServiceInfo {
 	name := publisher + "_" + service
-	cmd := &cmdLANQuery{name, 1, make(chan []*serviceInfo, 1)}
+	cmd := &cmdLANQuery{name, make(chan []*ServiceInfo, 1)}
 	r.cmdChan <- cmd
 
 	return <-cmd.chanServiceInfo
@@ -240,6 +294,11 @@ func (r *registryLAN) queryServiceInLAN(publisher, service string) []*serviceInf
 func (r *registryLAN) run() {
 	pconn := r.packetConn
 	lg := r.s.lg
+	packetChan := make(chan *packetMsg)
+	// "publisher_service": "12345"
+	localServiceTable := make(map[string]string)
+	// "publisher_service": {time.Time, {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}}
+	serviceCache := make(map[string]*providers)
 
 	readConn := func() {
 		buf := make([]byte, 512)
@@ -255,7 +314,7 @@ func (r *registryLAN) run() {
 			}
 			var msg interface{}
 			gotiny.Unmarshal(buf[:n], &msg)
-			r.packetChan <- &packetMsg{msg, raddr}
+			packetChan <- &packetMsg{msg, raddr}
 		}
 	}
 	go readConn()
@@ -268,17 +327,20 @@ func (r *registryLAN) run() {
 	}
 
 	getServiceInfos := func(cmd *cmdLANQuery) {
-		prvds := r.serviceCache[cmd.name]
-		var serviceInfos []*serviceInfo
-		for providerID, addr := range prvds.table {
-			svcInfo := &serviceInfo{providerID: providerID, addr: addr}
-			serviceInfos = append(serviceInfos, svcInfo)
+		prvds, has := serviceCache[cmd.name]
+		var serviceInfos []*ServiceInfo
+		if has {
+			for pID, pInfo := range prvds.table {
+				svcInfo := &ServiceInfo{providerID: pID, addr: pInfo.addr}
+				serviceInfos = append(serviceInfos, svcInfo)
+			}
 		}
 		cmd.chanServiceInfo <- serviceInfos
 	}
 
+	wildcardQuery := ""
+	wildcardQueryTime := time.Now()
 	chanDelay := make(chan *cmdLANQuery, 8)
-
 	for {
 		select {
 		case <-r.done:
@@ -286,42 +348,77 @@ func (r *registryLAN) run() {
 		case cmd := <-r.cmdChan:
 			switch cmd := cmd.(type) {
 			case *cmdLANRegister:
-				r.localServiceTable[cmd.name] = cmd.port
+				localServiceTable[cmd.name] = cmd.port
 			case *cmdLANQuery:
+				wait := false
 				t := time.Now()
-				prvds, has := r.serviceCache[cmd.name]
-				if !has {
-					prvds = &providers{t, make(map[string]string)}
-					r.serviceCache[cmd.name] = prvds
-				}
-				if t.After(prvds.timeStamp.Add(time.Duration(cmd.interval) * time.Second)) {
-					getServiceInfos(cmd)
-					if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
-						lg.Warnln("lan registry send broadcast error: ", err)
-						break
+				if strings.Contains(cmd.name, "*") {
+					if wildcardQuery != cmd.name || t.After(wildcardQueryTime.Add(5*time.Second)) {
+						for name, prvds := range serviceCache {
+							if wildcardMatch(cmd.name, name) {
+								for pID, pInfo := range prvds.table {
+									if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
+										delete(prvds.table, pID)
+									}
+								}
+								prvds.timeStamp = t
+							}
+						}
+						if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
+							lg.Warnln("lan registry send broadcast error: ", err)
+							break
+						}
+						wildcardQuery = cmd.name
+						wildcardQueryTime = t
+						wait = true
 					}
-					prvds.timeStamp = t
 				} else {
-					time.AfterFunc(time.Duration(cmd.interval)*time.Second, func() { chanDelay <- cmd })
+					prvds, has := serviceCache[cmd.name]
+					if !has || t.After(prvds.timeStamp.Add(5*time.Second)) {
+						if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
+							lg.Warnln("lan registry send broadcast error: ", err)
+							break
+						}
+						prvds.timeStamp = t
+						wait = true
+					}
+				}
+				if wait {
+					time.AfterFunc(time.Second, func() { chanDelay <- cmd })
+				} else {
+					getServiceInfos(cmd)
 				}
 			default:
 				panic("unknown cmd")
 			}
 		case cmd := <-chanDelay:
 			getServiceInfos(cmd)
-		case packetMsg := <-r.packetChan:
+		case packetMsg := <-packetChan:
 			msg := packetMsg.msg
 			raddr := packetMsg.raddr
 			switch msg := msg.(type) {
 			case *queryInLAN:
-				port, has := r.localServiceTable[msg.name]
-				if has {
-					replyTo(&foundInLAN{msg.name, r.s.providerID, port}, raddr)
+				if strings.Contains(msg.name, "*") {
+					for name, port := range localServiceTable {
+						if wildcardMatch(msg.name, name) {
+							replyTo(&foundInLAN{name, r.s.providerID, port}, raddr)
+						}
+					}
+				} else {
+					port, has := localServiceTable[msg.name]
+					if has {
+						replyTo(&foundInLAN{msg.name, r.s.providerID, port}, raddr)
+					}
 				}
 			case *foundInLAN:
 				rhost, _, _ := net.SplitHostPort(raddr.String())
-				prvds := r.serviceCache[msg.name]
-				prvds.table[msg.providerID] = rhost + ":" + msg.port
+				t := time.Now()
+				prvds, has := serviceCache[msg.name]
+				if !has {
+					prvds = &providers{t, make(map[string]*providerInfo)}
+					serviceCache[msg.name] = prvds
+				}
+				prvds.table[msg.providerID] = &providerInfo{t, rhost + ":" + msg.port}
 			default:
 				panic("unknown msg")
 			}
@@ -346,7 +443,7 @@ func regServiceWAN(svc *service, port string) error {
 }
 
 // support wildcard
-func queryServiceWAN(publisherName, serviceName string) (serviceInfos []*serviceInfo) {
+func queryServiceWAN(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeWAN))
 	c.init()
 	conn, err := c.newTCPConnection(c.registryAddr)
@@ -357,10 +454,6 @@ func queryServiceWAN(publisherName, serviceName string) (serviceInfos []*service
 
 	conn.SendRecv(&queryServiceInWAN{publisherName, serviceName}, &serviceInfos)
 	return
-}
-
-func allServicesWAN() []*serviceInfo {
-	return queryServiceWAN("*", "*")
 }
 
 func lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
@@ -383,11 +476,6 @@ func lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) 
 		}
 	}
 	return
-}
-
-type providerInfo struct {
-	timeStamp time.Time
-	addr      string
 }
 
 type providerMap struct {
@@ -443,7 +531,7 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	return OK
 }
 
-// reply []*serviceInfo
+// reply []*ServiceInfo
 // support wildcard(*) matching
 type queryServiceInWAN struct {
 	publisher string
@@ -453,7 +541,7 @@ type queryServiceInWAN struct {
 func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	rr := stream.GetContext().(*rootRegistry)
 	name := msg.publisher + "_" + msg.service
-	var serviceInfos []*serviceInfo
+	var serviceInfos []*ServiceInfo
 
 	walkProviderMap := func(service string, pmap *providerMap) {
 		pmap.RLock()
@@ -471,7 +559,12 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 					}
 					pInfo.timeStamp = t
 				}
-				svcInfo := &serviceInfo{name: service, providerID: pID, addr: pInfo.addr}
+				svcInfo := &ServiceInfo{providerID: pID, addr: pInfo.addr}
+				if len(service) != 0 {
+					ss := strings.Split(service, "_")
+					svcInfo.publisher = ss[0]
+					svcInfo.service = ss[1]
+				}
 				serviceInfos = append(serviceInfos, svcInfo)
 			}()
 		}
