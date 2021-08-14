@@ -23,20 +23,15 @@ func NewClient(options ...Option) *Client {
 		o(c.conf)
 	}
 
-	c.lg.Debugln("new client created")
+	c.lg.Debugf("new client created")
 	return c
 }
 
 func (c *Client) init() {
-	providerID, _ := discoverProviderID()
-	if len(providerID) != 0 {
-		c.localProviderID = providerID
-	}
-
 	if c.scope&ScopeWAN == ScopeWAN {
 		// registryAddr not provided by user
 		if len(c.registryAddr) == 0 {
-			if addr, err := discoverRegistryAddr(); err != nil {
+			if addr, err := discoverRegistryAddr(c.lg); err != nil {
 				c.lg.Warnf("registry address not found: %s", err)
 			} else {
 				c.registryAddr = addr
@@ -44,7 +39,7 @@ func (c *Client) init() {
 			}
 		}
 	}
-	c.lg.Debugln("client initialized")
+	c.lg.Debugf("client initialized")
 }
 
 // Discover discovers the wanted service and returns the connection channel,
@@ -84,6 +79,12 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			expect = -1 // all
 			providerIDs = nil
 		}
+		if len(c.localProviderID) == 0 {
+			providerID, _ := discoverProviderID(c.lg)
+			if len(providerID) != 0 {
+				c.localProviderID = providerID
+			}
+		}
 	}
 
 	findWithinOS := func() int {
@@ -94,6 +95,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			ct := lookupServiceChan(publisher, service)
 			if ct != nil {
 				connections <- ct.newConnection()
+				c.lg.Debugf("channel transport connected")
 				return 1
 			}
 		}
@@ -102,9 +104,10 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			if len(addr) != 0 {
 				conn, err := c.newUDSConnection(addr)
 				if err != nil {
-					c.lg.Errorln("dial " + addr + " failed")
+					c.lg.Errorf("dial " + addr + " failed")
 				} else {
 					connections <- conn
+					c.lg.Debugf("unix domain socket connected to: %s", addr)
 					return 1
 				}
 			}
@@ -125,20 +128,21 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 
 				conn, err := c.newTCPConnection(addr)
 				if err != nil {
-					c.lg.Warnln("dial " + addr + " failed")
+					c.lg.Warnf("dial " + addr + " failed")
 				} else {
 					connections <- conn
+					c.lg.Debugf("tcp socket connected to: %s", addr)
 					found++
 				}
 			}
 		}
 
 		if found != expect && c.scope&ScopeLAN == ScopeLAN {
-			addrs = lookupServiceLAN(publisher, service, providerIDs...)
+			addrs = lookupServiceLAN(publisher, service, c.lg, providerIDs...)
 			connect()
 		}
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
-			addrs = lookupServiceWAN(publisher, service, providerIDs...)
+			addrs = lookupServiceWAN(publisher, service, c.lg, providerIDs...)
 			connect()
 		}
 		return found
@@ -158,6 +162,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			if timeout == 0 {
 				break
 			}
+			c.lg.Debugf("waiting for service")
 			time.Sleep(time.Second)
 			timeout--
 		}

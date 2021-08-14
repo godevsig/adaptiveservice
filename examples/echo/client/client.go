@@ -2,6 +2,8 @@ package client
 
 import (
 	"fmt"
+	"os"
+	"sync"
 	"time"
 
 	as "github.com/godevsig/adaptiveservice"
@@ -9,8 +11,13 @@ import (
 )
 
 // Run runs the client.
-func Run() {
-	c := as.NewClient(as.WithLogger(as.LoggerAll{}), as.WithRegistryAddr("10.182.105.138:11985"))
+func Run(lg as.Logger) {
+	var opts []as.Option
+	opts = append(opts, as.WithLogger(lg))
+	if ra := os.Getenv("registryAddr"); len(ra) != 0 {
+		//opts = append(opts, as.WithRegistryAddr(ra))
+	}
+	c := as.NewClient(opts...)
 	conn := <-c.Discover("example.org", "echo.v1.0")
 	defer conn.Close()
 
@@ -24,22 +31,26 @@ func Run() {
 		if err := conn.SendRecv(&req, &rep); err != nil {
 			fmt.Println(err)
 		}
-		fmt.Println(&rep)
+		fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
 		time.Sleep(time.Second)
 	}
 
+	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
+		wg.Add(1)
 		go func(i int) {
+			defer wg.Done()
 			stream := conn.NewStream()
 			req := echo.MessageRequest{
 				Msg: "ni hao",
-				Num: int32(i),
+				Num: 10 * int32(i),
 			}
 			var rep echo.MessageReply
 			if err := stream.SendRecv(&req, &rep); err != nil {
 				fmt.Println(err)
 			}
-			fmt.Println(&rep)
+			fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
 		}(i)
 	}
+	wg.Wait()
 }

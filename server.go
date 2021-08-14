@@ -24,6 +24,7 @@ type Server struct {
 	qScale           int
 	msgTypeCheck     bool
 	closers          []closer
+	initialized      bool
 }
 
 // NewServer creates a server which publishes services.
@@ -41,7 +42,7 @@ func NewServer(options ...Option) *Server {
 		o(s.conf)
 	}
 
-	s.lg.Debugln("new server created")
+	s.lg.Debugf("new server created")
 	return s
 }
 
@@ -54,18 +55,22 @@ func genID() string {
 }
 
 func (s *Server) init() {
+	if s.initialized {
+		return
+	}
+	s.initialized = true
 	initSigCleaner(s.lg)
 	addSigCloser(s)
 	s.mq = newMsgQ(s.qWeight, s.qScale, s.lg)
 	s.addCloser(s.mq)
 
 	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
-		if id, err := discoverProviderID(); err != nil {
+		if id, err := discoverProviderID(s.lg); err != nil {
 			if len(s.providerID) != 0 {
 				if err := s.publishProviderInfoService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified provider ID: %s, run provider info service", s.providerID)
+				s.lg.Infof("user specified provider ID: %s, provider info service started", s.providerID)
 			} else {
 				s.providerID = genID()
 				s.lg.Infof("provider ID not found, using new generated ID: %s", s.providerID)
@@ -80,9 +85,9 @@ func (s *Server) init() {
 	}
 
 	if s.scope&ScopeLAN == ScopeLAN {
-		s.lg.Infoln("configing server in local network scope")
+		s.lg.Infof("configing server in local network scope")
 		func() {
-			c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
+			c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
 			conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 			if conn != nil {
 				conn.Close()
@@ -94,7 +99,7 @@ func (s *Server) init() {
 				if err := s.publishLANRegistryService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified broadcast port : %s, run LAN registry service", s.bcastPort)
+				s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.bcastPort)
 			} else {
 				s.lg.Warnf("LAN registry not configured")
 			}
@@ -102,18 +107,13 @@ func (s *Server) init() {
 	}
 
 	if s.scope&ScopeWAN == ScopeWAN {
-		s.lg.Infoln("configing server in public network scope")
-		if len(s.rootRegistryPort) != 0 {
-			if err := s.startRootRegistry(); err != nil {
-				panic(err)
-			}
-		}
-		if addr, err := discoverRegistryAddr(); err != nil {
+		s.lg.Infof("configing server in public network scope")
+		if addr, err := discoverRegistryAddr(s.lg); err != nil {
 			if len(s.registryAddr) != 0 {
 				if err := s.publishRegistryInfoService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified registry address: %s, run registry info service", s.registryAddr)
+				s.lg.Infof("user specified registry address: %s, registry info service started", s.registryAddr)
 			} else {
 				s.lg.Warnf("registry address not found: %s", err)
 			}
@@ -124,6 +124,16 @@ func (s *Server) init() {
 			s.registryAddr = addr
 			s.lg.Infof("discovered registry address: %s", addr)
 		}
+	}
+
+	if len(s.rootRegistryPort) != 0 {
+		if s.scope&ScopeWAN != ScopeWAN {
+			panic("scope error")
+		}
+		if err := s.startRootRegistry(); err != nil {
+			panic(err)
+		}
+		s.lg.Infof("root registry started at %s", s.rootRegistryPort)
 	}
 
 	if s.reverseProxy {
@@ -137,9 +147,9 @@ func (s *Server) init() {
 		if err := s.publishReverseProxyService(scope); err != nil {
 			panic(err)
 		}
-		s.lg.Infoln("reverse proxy started")
+		s.lg.Infof("reverse proxy started")
 	}
-	s.lg.Debugln("server initialized")
+	s.lg.Debugf("server initialized")
 }
 
 type service struct {
@@ -162,6 +172,7 @@ func (svc *service) canHandle(msg interface{}) bool {
 }
 
 func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
+	s.lg.Debugf("publishing %s %s in scope %b", publisherName, serviceName, scope)
 	newService := func() *service {
 		svc := &service{
 			publisherName: publisherName,
@@ -182,7 +193,8 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	if scope > s.scope {
 		panic("publishing in larger scope than allowed")
 	}
-	s.once.Do(s.init)
+	//s.once.Do(s.init)
+	s.init()
 
 	svc := newService()
 	for _, opt := range options {
@@ -228,11 +240,12 @@ func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, optio
 
 // Serve starts serving.
 func (s *Server) Serve() error {
+	s.lg.Infof("server in serve")
 	for e := range s.errRecovers {
 		if e.Recover() {
-			s.lg.Infoln("error recovered:", e.String(), ":", e.Error())
+			s.lg.Infof("error recovered: %s : %v", e.String(), e.Error())
 		} else {
-			s.lg.Errorln("error not recovered:", e.String(), ":", e.Error())
+			s.lg.Errorf("error not recovered: %s : %v", e.String(), e.Error())
 			return e.Error()
 		}
 	}

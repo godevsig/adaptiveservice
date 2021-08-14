@@ -1,44 +1,31 @@
 package server
 
 import (
+	"net"
+	"os"
+
 	as "github.com/godevsig/adaptiveservice"
 )
 
-// MessageRequest is the message sent by client.
-type MessageRequest struct {
-	Msg string
-	Num int32
-}
-
-// MessageReply is the message replied by server,
-// with Num+1 and a signature of "yours echo.v1.0".
-type MessageReply struct {
-	*MessageRequest
-	Signature string
-}
-
-// Handle handles MessageRequest.
-func (msg *MessageRequest) Handle(stream as.ContextStream) (reply interface{}) {
-	msg.Msg = msg.Msg + "!"
-	msg.Num++
-	return &MessageReply{msg, "yours echo.v1.0"}
-}
-
 // Run runs the server.
-func Run() {
-	s := as.NewServer(as.WithLogger(as.LoggerAll{}), as.WithRegistryAddr("10.182.105.138:11985")).
+func Run(lg as.Logger) {
+	var opts []as.Option
+	opts = append(opts, as.WithLogger(lg))
+	rrport := ""
+	if ra := os.Getenv("registryAddr"); len(ra) != 0 {
+		opts = append(opts, as.WithRegistryAddr(ra))
+		_, rrport, _ = net.SplitHostPort(ra)
+	}
+	bcastport := os.Getenv("lanBroadcastPort")
+
+	s := as.NewServer(opts...).
 		SetPublisher("example.org").
-		SetBroadcastPort("9923").
-		EnableRootRegistry("11985").
-		EnableReverseProxy().
+		SetBroadcastPort(bcastport).
+		EnableRootRegistry(rrport).
+		//EnableReverseProxy().
 		EnableServiceLister()
 
 	knownMsg := []as.KnownMessage{(*MessageRequest)(nil)}
 	s.Publish("echo.v1.0", knownMsg)
 	s.Serve()
-}
-
-func init() {
-	as.RegisterType((*MessageRequest)(nil))
-	as.RegisterType((*MessageReply)(nil))
 }

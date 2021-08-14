@@ -34,8 +34,8 @@ func (msg *reqRegistryInfo) Handle(stream ContextStream) (reply interface{}) {
 	return sharedInfo.registryAddr
 }
 
-func discoverRegistryAddr() (addr string, err error) {
-	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
+func discoverRegistryAddr(lg Logger) (addr string, err error) {
+	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
 	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "registryInfo")
 	if conn != nil {
@@ -63,8 +63,8 @@ func (msg *reqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
 	return sharedInfo.providerID
 }
 
-func discoverProviderID() (id string, err error) {
-	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
+func discoverProviderID(lg Logger) (id string, err error) {
+	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
 	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "providerInfo")
 	if conn != nil {
@@ -196,6 +196,7 @@ type ListService struct {
 
 // Handle handles ListService message.
 func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
+	s := stream.GetContext().(*Server)
 	var serviceInfos []*ServiceInfo
 
 	publisher, service := msg.name, msg.name
@@ -206,15 +207,19 @@ func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
 
 	serviceInfos = append(serviceInfos, queryServiceProcess(publisher, service)...)
 	serviceInfos = append(serviceInfos, queryServiceOS(publisher, service)...)
-	serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service)...)
-	serviceInfos = append(serviceInfos, queryServiceWAN(publisher, service)...)
+	serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service, s.lg)...)
+	serviceInfos = append(serviceInfos, queryServiceWAN(publisher, service, s.lg)...)
 	return serviceInfos
 }
 
 // publishServiceListerService declares the lister service.
 func (s *Server) publishServiceListerService(scope Scope) error {
 	knownMsgs := []KnownMessage{(*ListService)(nil)}
-	return s.publish(scope, BuiltinPublisher, "serviceLister", knownMsgs)
+	return s.publish(scope, BuiltinPublisher, "serviceLister",
+		knownMsgs,
+		OnNewStreamFunc(func(ctx Context) {
+			ctx.SetContext(s)
+		}))
 }
 
 func init() {

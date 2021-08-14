@@ -38,7 +38,7 @@ func newMsgQ(qWeight, qScale int, lg Logger) *msgQ {
 		done:              make(chan struct{}),
 	}
 	go mq.autoScaler()
-	lg.Debugln("msgq created with qSize ", qSize)
+	lg.Debugf("msgq created with qSize %v", qSize)
 	return mq
 }
 
@@ -46,12 +46,12 @@ func (mq *msgQ) close() {
 	close(mq.done)
 	mq.done = nil
 	mq.wp.close()
-	mq.lg.Debugln("msgq closed")
+	mq.lg.Debugf("msgq closed")
 }
 
 func (mq *msgQ) reorder() {
-	mq.lg.Debugln("msgq reorder started")
-	defer mq.lg.Debugln("msgq reorder stopped")
+	mq.lg.Debugf("msgq reorder started")
+	defer mq.lg.Debugf("msgq reorder stopped")
 	for {
 		var msgH, msgN, msgL *metaKnownMsg
 		select {
@@ -93,18 +93,20 @@ func (mq *msgQ) reorder() {
 	}
 }
 
-func (mq *msgQ) worker(done <-chan struct{}) {
+func (mq *msgQ) worker(done <-chan struct{}, st status) {
 	for {
 		select {
 		case <-done:
 			return
 		case mm := <-mq.getEgressChan():
+			st.working()
 			reply := mm.msg.Handle(mm.stream)
-			mq.lg.Debugf("message handled, reply: %v", reply)
+			mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
 			if reply != nil {
 				mm.stream.sendNoPrivate(reply)
 			}
 		}
+		st.idle()
 	}
 }
 
@@ -115,18 +117,18 @@ func (mq *msgQ) autoScaler() {
 		}
 		egressChan := mq.getEgressChan()
 		should := len(egressChan)/mq.qWeight + 1
-		now := mq.wp.len()
+		idle := mq.wp.len()
 
 		k := 1
 		switch {
-		case should > now:
-			k = should - now
+		case should > idle:
+			k = should - idle
 			mq.wp.addWorker(mq.worker)
-			mq.lg.Debugln("worker added")
-		case should < now:
-			k = now - should
+			mq.lg.Debugf("msgq autoScaler: idle %d -> should %d: worker added", idle, should)
+		case should < idle:
+			k = idle - should
 			mq.wp.rmWorker()
-			mq.lg.Debugln("worker removed")
+			mq.lg.Debugf("msgq autoScaler: idle %d -> should %d: worker removed", idle, should)
 		}
 		time.Sleep(time.Second / time.Duration(k))
 	}
@@ -140,32 +142,32 @@ func (mq *msgQ) putMetaMsg(mm *metaKnownMsg) {
 		}
 		if mq.egressChan == nil {
 			mq.egressChan = make(chan *metaKnownMsg, mq.qSize)
-			mq.lg.Debugln("msgq egressChan created")
+			mq.lg.Debugf("msgq egressChan created")
 			go mq.reorder()
 		}
 		mq.Unlock()
 	}
 
 	if _, ok := mm.msg.(HighPriorityMessage); ok {
-		mq.lg.Debugln("msgq high priority message received")
+		mq.lg.Debugf("msgq high priority message received: %#v", mm.msg)
 		if mq.ingressHighChan == nil {
 			initChan(&mq.ingressHighChan)
-			mq.lg.Debugln("msgq ingress high priority chan initialized")
+			mq.lg.Debugf("msgq ingress high priority chan initialized")
 		}
 		mq.ingressHighChan <- mm
 		return
 	}
 	if _, ok := mm.msg.(LowPriorityMessage); ok {
-		mq.lg.Debugln("msgq low priority message received")
+		mq.lg.Debugf("msgq low priority message received: %#v", mm.msg)
 		if mq.ingressLowChan == nil {
 			initChan(&mq.ingressLowChan)
-			mq.lg.Debugln("msgq ingress low priority chan initialized")
+			mq.lg.Debugf("msgq ingress low priority chan initialized")
 		}
 		mq.ingressLowChan <- mm
 		return
 	}
 
-	mq.lg.Debugln("msgq normal priority message received")
+	mq.lg.Debugf("msgq normal priority message received: %#v", mm.msg)
 	mq.ingressNormalChan <- mm
 }
 
@@ -177,7 +179,7 @@ func (mq *msgQ) getEgressChan() chan *metaKnownMsg {
 	if !mq.changeConfirmed {
 		mq.Lock()
 		mq.changeConfirmed = true
-		mq.lg.Debugln("msgq egressChan change confirmed")
+		mq.lg.Debugf("msgq egressChan change confirmed")
 		mq.Unlock()
 	}
 

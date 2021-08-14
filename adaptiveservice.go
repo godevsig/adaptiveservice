@@ -91,52 +91,48 @@ var (
 // Logger is the logger interface.
 type Logger interface {
 	Debugf(format string, args ...interface{})
-	Debugln(args ...interface{})
 	Infof(format string, args ...interface{})
-	Infoln(args ...interface{})
 	Warnf(format string, args ...interface{})
-	Warnln(args ...interface{})
 	Errorf(format string, args ...interface{})
-	Errorln(args ...interface{})
 }
 
-type loggerNull struct{}
+// LoggerNull prints no log
+type LoggerNull struct{}
 
-func (loggerNull) Debugf(format string, args ...interface{}) {}
-func (loggerNull) Debugln(args ...interface{})               {}
-func (loggerNull) Infof(format string, args ...interface{})  {}
-func (loggerNull) Infoln(args ...interface{})                {}
-func (loggerNull) Warnf(format string, args ...interface{})  {}
-func (loggerNull) Warnln(args ...interface{})                {}
-func (loggerNull) Errorf(format string, args ...interface{}) {}
-func (loggerNull) Errorln(args ...interface{})               {}
+// Debugf is Debugf
+func (LoggerNull) Debugf(format string, args ...interface{}) {}
+
+// Infof is Infof
+func (LoggerNull) Infof(format string, args ...interface{}) {}
+
+// Warnf is Warnf
+func (LoggerNull) Warnf(format string, args ...interface{}) {}
+
+// Errorf is Errorf
+func (LoggerNull) Errorf(format string, args ...interface{}) {}
 
 // LoggerAll prints all regardless of loglevel
 type LoggerAll struct{}
 
 // Debugf is Debugf
-func (LoggerAll) Debugf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
-
-// Debugln is Debugln
-func (LoggerAll) Debugln(args ...interface{}) { fmt.Println(args...) }
+func (LoggerAll) Debugf(format string, args ...interface{}) {
+	fmt.Printf("[AS DEBUG] "+format+"\n", args...)
+}
 
 // Infof is Infof
-func (LoggerAll) Infof(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
-
-// Infoln is Infoln
-func (LoggerAll) Infoln(args ...interface{}) { fmt.Println(args...) }
+func (LoggerAll) Infof(format string, args ...interface{}) {
+	fmt.Printf("[AS INFO] "+format+"\n", args...)
+}
 
 // Warnf is Warnf
-func (LoggerAll) Warnf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
-
-// Warnln is Warnln
-func (LoggerAll) Warnln(args ...interface{}) { fmt.Println(args...) }
+func (LoggerAll) Warnf(format string, args ...interface{}) {
+	fmt.Printf("[AS WARN] "+format+"\n", args...)
+}
 
 // Errorf is Errorf
-func (LoggerAll) Errorf(format string, args ...interface{}) { fmt.Printf(format+"\n", args...) }
-
-// Errorln is Errorln
-func (LoggerAll) Errorln(args ...interface{}) { fmt.Println(args...) }
+func (LoggerAll) Errorf(format string, args ...interface{}) {
+	fmt.Printf("[AS ERROR] "+format+"\n", args...)
+}
 
 type errorRecover interface {
 	Error() error
@@ -204,7 +200,7 @@ func initSigCleaner(lg Logger) {
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)
 		go func() {
 			sig := <-sigChan
-			lg.Warnln("signal: ", sig.String())
+			lg.Warnf("signal: %s", sig.String())
 			sigCleaner.Lock()
 			for _, c := range sigCleaner.closers {
 				c.close()
@@ -223,6 +219,7 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 	RegisterType(errors.New(""))
 	RegisterType(fmt.Errorf("%w", io.EOF))
+	RegisterType("")
 }
 
 // test if pattern matches str

@@ -14,7 +14,7 @@ type conf struct {
 
 func newConf() *conf {
 	return &conf{
-		lg:    loggerNull{},
+		lg:    LoggerNull{},
 		scope: ScopeAll,
 		qsize: 128,
 	}

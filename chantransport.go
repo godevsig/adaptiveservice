@@ -25,6 +25,7 @@ func (svc *service) newChanTransport() (*chanTransport, error) {
 	}
 	go ct.receiver()
 	regServiceChan(svc.publisherName, svc.serviceName, ct)
+	svc.s.lg.Infof("service %s %s listening on internal channel", svc.publisherName, svc.serviceName)
 	return ct, nil
 }
 
