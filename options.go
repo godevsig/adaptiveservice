@@ -1,14 +1,9 @@
 package adaptiveservice
 
-import (
-	"sync"
-)
-
 type conf struct {
 	lg           Logger
 	registryAddr string
 	scope        Scope
-	once         sync.Once
 	qsize        int
 }
 

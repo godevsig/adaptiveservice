@@ -123,15 +123,16 @@ func regServiceLAN(svc *service, port string, lg Logger) error {
 func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
-	if conn != nil {
-		defer conn.Close()
-		conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
+	if conn == nil {
+		panic("lan registry not found")
 	}
+	defer conn.Close()
+	conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
 	return
 }
 
-func lookupServiceLAN(publisherName, serviceName string, lg Logger, providerIDs ...string) (addrs []string) {
-	serviceInfos := queryServiceLAN(publisherName, serviceName, lg)
+func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
+	serviceInfos := queryServiceLAN(publisherName, serviceName, c.lg)
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
@@ -204,7 +205,7 @@ type registryLAN struct {
 }
 
 func (s *Server) newLANRegistry() (*registryLAN, error) {
-	packetConn, err := net.ListenPacket("udp4", ":"+s.bcastPort)
+	packetConn, err := net.ListenPacket("udp4", ":"+s.broadcastPort)
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +216,7 @@ func (s *Server) newLANRegistry() (*registryLAN, error) {
 		ip, ipnet, _ := net.ParseCIDR(addr.String())
 		if ip.To4() != nil && !ip.IsLoopback() {
 			bcast := broadcastAddr(ipnet)
-			bcastAddr, _ := net.ResolveUDPAddr("udp4", bcast.String()+":"+s.bcastPort)
+			bcastAddr, _ := net.ResolveUDPAddr("udp4", bcast.String()+":"+s.broadcastPort)
 			il := &infoLAN{
 				ip:        ip,
 				ipnet:     ipnet,
@@ -442,10 +443,10 @@ func (r *registryLAN) close() {
 	r.done = nil
 }
 
-func regServiceWAN(svc *service, port string, lg Logger) error {
-	c := NewClient(WithScope(ScopeWAN), WithLogger(lg))
-	c.init()
-	conn, err := c.newTCPConnection(c.registryAddr)
+func regServiceWAN(svc *service, port string) error {
+	c := NewClient(WithScope(ScopeWAN), WithLogger(svc.s.lg))
+	//c.init()
+	conn, err := c.newTCPConnection(svc.s.registryAddr)
 	if err != nil {
 		return err
 	}
@@ -454,11 +455,12 @@ func regServiceWAN(svc *service, port string, lg Logger) error {
 }
 
 // support wildcard
-func queryServiceWAN(publisherName, serviceName string, lg Logger) (serviceInfos []*ServiceInfo) {
+func queryServiceWAN(registryAddr, publisherName, serviceName string, lg Logger) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeWAN), WithLogger(lg))
-	c.init()
-	conn, err := c.newTCPConnection(c.registryAddr)
+	//c.init()
+	conn, err := c.newTCPConnection(registryAddr)
 	if err != nil {
+		lg.Errorf("connect to registry failed: %v", err)
 		return
 	}
 	defer conn.Close()
@@ -467,7 +469,7 @@ func queryServiceWAN(publisherName, serviceName string, lg Logger) (serviceInfos
 	return
 }
 
-func lookupServiceWAN(publisherName, serviceName string, lg Logger, providerIDs ...string) (addrs []string) {
+func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
@@ -480,7 +482,7 @@ func lookupServiceWAN(publisherName, serviceName string, lg Logger, providerIDs 
 		return false
 	}
 
-	serviceInfos := queryServiceWAN(publisherName, serviceName, lg)
+	serviceInfos := queryServiceWAN(c.registryAddr, publisherName, serviceName, c.lg)
 	for _, provider := range serviceInfos {
 		if has(provider.providerID) {
 			addrs = append(addrs, provider.addr)
@@ -609,10 +611,7 @@ func init() {
 	RegisterType((*queryServiceInWAN)(nil))
 }
 
-func (s *Server) startRootRegistry() error {
-	if len(s.rootRegistryPort) == 0 {
-		panic("no rootRegistryPort")
-	}
+func (s *Server) startRootRegistry(port string) error {
 	svc := &service{
 		publisherName: BuiltinPublisher,
 		serviceName:   "rootRegistry",
@@ -630,7 +629,7 @@ func (s *Server) startRootRegistry() error {
 	svc.fnOnNewStream = func(ctx Context) {
 		ctx.SetContext(rr)
 	}
-	tran, err := svc.newTCPTransport(s.rootRegistryPort)
+	tran, err := svc.newTCPTransport(port)
 	if err != nil {
 		return err
 	}

@@ -27,21 +27,6 @@ func NewClient(options ...Option) *Client {
 	return c
 }
 
-func (c *Client) init() {
-	if c.scope&ScopeWAN == ScopeWAN {
-		// registryAddr not provided by user
-		if len(c.registryAddr) == 0 {
-			if addr, err := discoverRegistryAddr(c.lg); err != nil {
-				c.lg.Warnf("registry address not found: %s", err)
-			} else {
-				c.registryAddr = addr
-				c.lg.Infof("discovered registry address: %s", addr)
-			}
-		}
-	}
-	c.lg.Debugf("client initialized")
-}
-
 // Discover discovers the wanted service and returns the connection channel,
 // from which user can get one or more connections.
 // Each connection represents a connection to one of the service providers
@@ -54,7 +39,6 @@ func (c *Client) init() {
 // If any of the provider ids is "*", discover will return all available
 // connections of the wanted service.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {
-	c.once.Do(c.init)
 	connections := make(chan Connection)
 
 	has := func(target string) bool {
@@ -138,11 +122,19 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		}
 
 		if found != expect && c.scope&ScopeLAN == ScopeLAN {
-			addrs = lookupServiceLAN(publisher, service, c.lg, providerIDs...)
+			addrs = c.lookupServiceLAN(publisher, service, providerIDs...)
 			connect()
 		}
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
-			addrs = lookupServiceWAN(publisher, service, c.lg, providerIDs...)
+			if len(c.registryAddr) == 0 {
+				if addr, err := discoverRegistryAddr(c.lg); err != nil {
+					panic("registry address not found or configured")
+				} else {
+					c.registryAddr = addr
+					c.lg.Infof("discovered registry address: %s", addr)
+				}
+			}
+			addrs = c.lookupServiceWAN(publisher, service, providerIDs...)
 			connect()
 		}
 		return found

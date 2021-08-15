@@ -77,10 +77,6 @@ func discoverProviderID(lg Logger) (id string, err error) {
 // publishLANRegistryService declares the LAN registry service,
 // which provides service publishing and discovery service in LAN network.
 func (s *Server) publishLANRegistryService() error {
-	if len(s.bcastPort) == 0 {
-		panic("listening port not specified")
-	}
-
 	registry, err := s.newLANRegistry()
 	if err != nil {
 		return err
@@ -205,10 +201,18 @@ func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
 		publisher, service = strs[0], strs[1]
 	}
 
-	serviceInfos = append(serviceInfos, queryServiceProcess(publisher, service)...)
-	serviceInfos = append(serviceInfos, queryServiceOS(publisher, service)...)
-	serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service, s.lg)...)
-	serviceInfos = append(serviceInfos, queryServiceWAN(publisher, service, s.lg)...)
+	if s.scope&ScopeProcess == ScopeProcess {
+		serviceInfos = append(serviceInfos, queryServiceProcess(publisher, service)...)
+	}
+	if s.scope&ScopeOS == ScopeOS {
+		serviceInfos = append(serviceInfos, queryServiceOS(publisher, service)...)
+	}
+	if s.scope&ScopeLAN == ScopeLAN {
+		serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service, s.lg)...)
+	}
+	if s.scope&ScopeWAN == ScopeWAN {
+		serviceInfos = append(serviceInfos, queryServiceWAN(s.registryAddr, publisher, service, s.lg)...)
+	}
 	return serviceInfos
 }
 

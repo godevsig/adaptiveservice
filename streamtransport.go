@@ -69,7 +69,7 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	}
 
 	if svc.scope&ScopeWAN == ScopeWAN {
-		if err := regServiceWAN(svc, port, svc.s.lg); err != nil {
+		if err := regServiceWAN(svc, port); err != nil {
 			svc.s.lg.Infof("service %s %s can not register to WAN directly: %v", svc.publisherName, svc.serviceName, err)
 			c := NewClient(WithScope(ScopeLAN|ScopeWAN), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
 			connChan := c.Discover(BuiltinPublisher, "reverseProxy", "*")

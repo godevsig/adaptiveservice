@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net"
 	"os"
 
 	as "github.com/godevsig/adaptiveservice"
@@ -11,17 +10,15 @@ import (
 func Run(lg as.Logger) {
 	var opts []as.Option
 	opts = append(opts, as.WithLogger(lg))
-	rrport := ""
 	if ra := os.Getenv("registryAddr"); len(ra) != 0 {
 		opts = append(opts, as.WithRegistryAddr(ra))
-		_, rrport, _ = net.SplitHostPort(ra)
 	}
 	bcastport := os.Getenv("lanBroadcastPort")
 
 	s := as.NewServer(opts...).
 		SetPublisher("example.org").
 		SetBroadcastPort(bcastport).
-		EnableRootRegistry(rrport).
+		EnableRootRegistry().
 		//EnableReverseProxy().
 		EnableServiceLister()
 

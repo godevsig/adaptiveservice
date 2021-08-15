@@ -12,19 +12,19 @@ import (
 // Server provides services.
 type Server struct {
 	*conf
-	publisher        string
-	providerID       string
-	bcastPort        string
-	rootRegistryPort string
-	reverseProxy     bool
-	serviceLister    bool
-	errRecovers      chan errorRecover
-	mq               *msgQ
-	qWeight          int
-	qScale           int
-	msgTypeCheck     bool
-	closers          []closer
-	initialized      bool
+	publisher     string
+	providerID    string
+	broadcastPort string
+	rootRegistry  bool
+	reverseProxy  bool
+	serviceLister bool
+	errRecovers   chan errorRecover
+	mq            *msgQ
+	qWeight       int
+	qScale        int
+	msgTypeCheck  bool
+	closers       []closer
+	initialized   bool
 }
 
 // NewServer creates a server which publishes services.
@@ -95,13 +95,13 @@ func (s *Server) init() {
 				return
 			}
 
-			if len(s.bcastPort) != 0 {
+			if len(s.broadcastPort) != 0 {
 				if err := s.publishLANRegistryService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.bcastPort)
+				s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.broadcastPort)
 			} else {
-				s.lg.Warnf("LAN registry not configured")
+				panic("LAN registry not found or configured")
 			}
 		}()
 	}
@@ -113,32 +113,37 @@ func (s *Server) init() {
 				if err := s.publishRegistryInfoService(); err != nil {
 					panic(err)
 				}
-				s.lg.Infof("user specified registry address: %s, registry info service started", s.registryAddr)
+				s.lg.Infof("user specified root registry address: %s, registry info service started", s.registryAddr)
 			} else {
-				s.lg.Warnf("registry address not found: %s", err)
+				panic("root registry address not found or configured")
 			}
 		} else {
 			if len(s.registryAddr) != 0 && addr != s.registryAddr {
-				panic(fmt.Sprintf("conflict registry address: %s => %s ?", addr, s.registryAddr))
+				panic(fmt.Sprintf("conflict root registry address: %s => %s ?", addr, s.registryAddr))
 			}
 			s.registryAddr = addr
-			s.lg.Infof("discovered registry address: %s", addr)
+			s.lg.Infof("discovered root registry address: %s", addr)
 		}
 	}
 
-	if len(s.rootRegistryPort) != 0 {
+	if s.rootRegistry {
 		if s.scope&ScopeWAN != ScopeWAN {
 			panic("scope error")
 		}
-		if err := s.startRootRegistry(); err != nil {
+		if len(s.registryAddr) == 0 {
+			panic("root registry address not configured")
+		}
+
+		_, port, _ := net.SplitHostPort(s.registryAddr)
+		if err := s.startRootRegistry(port); err != nil {
 			panic(err)
 		}
-		s.lg.Infof("root registry started at %s", s.rootRegistryPort)
+		s.lg.Infof("root registry started at %s", port)
 	}
 
 	if s.reverseProxy {
 		scope := ScopeLAN
-		if len(s.rootRegistryPort) != 0 {
+		if s.rootRegistry {
 			scope |= ScopeWAN
 		}
 		if s.scope&scope != scope {
@@ -193,8 +198,10 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	if scope > s.scope {
 		panic("publishing in larger scope than allowed")
 	}
-	//s.once.Do(s.init)
-	s.init()
+
+	if !s.initialized {
+		s.init()
+	}
 
 	svc := newService()
 	for _, opt := range options {
