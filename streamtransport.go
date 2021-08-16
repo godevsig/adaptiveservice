@@ -94,6 +94,7 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 }
 
 func (st *streamTransport) close() {
+	st.svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
 	st.lnr.Close()
 	if st.reverseProxyConn != nil {
 		st.reverseProxyConn.Close()

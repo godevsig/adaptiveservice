@@ -7,10 +7,12 @@ import (
 	"net"
 	"reflect"
 	"strings"
+	"sync"
 )
 
 // Server provides services.
 type Server struct {
+	sync.Mutex
 	*conf
 	publisher     string
 	providerID    string
@@ -48,8 +50,21 @@ func NewServer(options ...Option) *Server {
 
 // TODO: use mac to generate fixed id
 func genID() string {
-	b := make([]byte, 6)
-	rand.Read(b)
+	var b []byte
+
+	itfs, _ := net.Interfaces()
+	for _, itf := range itfs {
+		if len(itf.HardwareAddr) != 0 {
+			b = itf.HardwareAddr
+			break
+		}
+	}
+
+	if len(b) == 0 {
+		b = make([]byte, 6)
+		rand.Read(b)
+	}
+
 	id := hex.EncodeToString(b)
 	return id
 }
@@ -66,15 +81,13 @@ func (s *Server) init() {
 
 	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
 		if id, err := discoverProviderID(s.lg); err != nil {
-			if len(s.providerID) != 0 {
-				if err := s.publishProviderInfoService(); err != nil {
-					panic(err)
-				}
-				s.lg.Infof("user specified provider ID: %s, provider info service started", s.providerID)
-			} else {
+			if len(s.providerID) == 0 {
 				s.providerID = genID()
-				s.lg.Infof("provider ID not found, using new generated ID: %s", s.providerID)
 			}
+			if err := s.publishProviderInfoService(); err != nil {
+				panic(err)
+			}
+			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
 		} else {
 			if len(s.providerID) != 0 && id != s.providerID {
 				panic(fmt.Sprintf("conflict provider ID: %s => %s ?", id, s.providerID))
@@ -247,6 +260,10 @@ func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, optio
 
 // Serve starts serving.
 func (s *Server) Serve() error {
+	if !s.initialized {
+		s.init()
+	}
+	defer s.close()
 	s.lg.Infof("server in serve")
 	for e := range s.errRecovers {
 		if e.Recover() {
@@ -269,7 +286,14 @@ func (s *Server) Close() {
 }
 
 func (s *Server) close() {
+	s.Lock()
+	defer s.Unlock()
+	if s.closers == nil {
+		return
+	}
+	s.lg.Infof("server closing")
 	for _, closer := range s.closers {
 		closer.close()
 	}
+	s.closers = nil
 }

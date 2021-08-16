@@ -331,6 +331,7 @@ func (r *registryLAN) run() {
 
 	replyTo := func(msg interface{}, raddr net.Addr) {
 		bufMsg := gotiny.Marshal(&msg)
+		lg.Debugf("sending LAN msg to %v: %#v", raddr, msg)
 		if _, err := pconn.WriteTo(bufMsg, raddr); err != nil {
 			lg.Warnf("lan registry send error: %v", err)
 		}

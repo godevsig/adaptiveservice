@@ -2,7 +2,6 @@ package client
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -14,9 +13,7 @@ import (
 func Run(lg as.Logger) {
 	var opts []as.Option
 	opts = append(opts, as.WithLogger(lg))
-	if ra := os.Getenv("registryAddr"); len(ra) != 0 {
-		//opts = append(opts, as.WithRegistryAddr(ra))
-	}
+
 	c := as.NewClient(opts...)
 	conn := <-c.Discover("example.org", "echo.v1.0")
 	defer conn.Close()

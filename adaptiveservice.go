@@ -220,6 +220,7 @@ func init() {
 	RegisterType(errors.New(""))
 	RegisterType(fmt.Errorf("%w", io.EOF))
 	RegisterType("")
+	RegisterType(0)
 }
 
 // test if pattern matches str

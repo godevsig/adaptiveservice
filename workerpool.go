@@ -43,6 +43,7 @@ func (wp *workerPool) addWorker(w worker) {
 		if *pc == nil {
 			wp.workers[i] = &done
 			added = true
+			break
 		}
 	}
 	if !added {
