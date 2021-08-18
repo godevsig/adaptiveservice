@@ -2,6 +2,7 @@ package adaptiveservice
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
@@ -47,7 +48,6 @@ func NewServer(options ...Option) *Server {
 	return s
 }
 
-// TODO: use mac to generate fixed id
 func genID() string {
 	var b []byte
 
@@ -59,7 +59,8 @@ func genID() string {
 		}
 	}
 
-	if len(b) == 0 {
+	m := binary.BigEndian.Uint32(b[:4])
+	if len(b) == 0 || m == 0x0242ac11 {
 		b = make([]byte, 6)
 		rand.Read(b)
 	}

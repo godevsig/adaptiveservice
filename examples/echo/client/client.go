@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -16,6 +17,10 @@ func Run(lg as.Logger) {
 
 	c := as.NewClient(opts...)
 	conn := <-c.Discover("example.org", "echo.v1.0")
+	if conn == nil {
+		fmt.Println(as.ErrServiceNotFound)
+		os.Exit(1)
+	}
 	defer conn.Close()
 
 	var rep echo.MessageReply

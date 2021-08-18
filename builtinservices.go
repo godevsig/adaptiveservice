@@ -51,14 +51,15 @@ func (s *Server) publishProviderInfoService() error {
 		panic("provider ID not specified")
 	}
 	sharedInfo.providerID = s.providerID
-	knownMsgs := []KnownMessage{(*reqProviderInfo)(nil)}
+	knownMsgs := []KnownMessage{(*ReqProviderInfo)(nil)}
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, "providerInfo", knownMsgs)
 }
 
-// reply with string
-type reqProviderInfo struct{}
+// ReqProviderInfo gets self provider ID, reply with string.
+type ReqProviderInfo struct{}
 
-func (msg *reqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
+// Handle handles ReqProviderInfo.
+func (msg *ReqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
 	return sharedInfo.providerID
 }
 
@@ -68,7 +69,7 @@ func discoverProviderID(lg Logger) (id string, err error) {
 	conn := <-c.Discover(BuiltinPublisher, "providerInfo")
 	if conn != nil {
 		defer conn.Close()
-		err = conn.SendRecv(&reqProviderInfo{}, &id)
+		err = conn.SendRecv(&ReqProviderInfo{}, &id)
 	}
 	return
 }
@@ -226,7 +227,7 @@ func (s *Server) publishServiceListerService(scope Scope) error {
 
 func init() {
 	RegisterType((*reqRegistryInfo)(nil))
-	RegisterType((*reqProviderInfo)(nil))
+	RegisterType((*ReqProviderInfo)(nil))
 	RegisterType((*queryServiceInLAN)(nil))
 	RegisterType((*registerServiceForLAN)(nil))
 	RegisterType((*proxyRegServiceInWAN)(nil))

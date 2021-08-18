@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	as "github.com/godevsig/adaptiveservice"
@@ -19,6 +20,20 @@ func trimName(name string, size int) string {
 		name = name[:size-3] + "..."
 	}
 	return name
+}
+
+func getSelfID(opts []as.Option) (selfID string, err error) {
+	opts = append(opts, as.WithScope(as.ScopeProcess|as.ScopeOS))
+	c := as.NewClient(opts...).SetDiscoverTimeout(0)
+	conn := <-c.Discover(as.BuiltinPublisher, "providerInfo")
+	if conn == nil {
+		err = as.ErrServiceNotFound
+		return
+	}
+	defer conn.Close()
+
+	err = conn.SendRecv(&as.ReqProviderInfo{}, &selfID)
+	return
 }
 
 func main() {
@@ -65,6 +80,7 @@ func main() {
 			s.Serve()
 			return 0
 		}
+
 		cmds = append(cmds, subCmd{cmd, action})
 	}
 	{
@@ -82,8 +98,18 @@ func main() {
 			if *debug {
 				opts = append(opts, as.WithLogger(as.LoggerAll{}))
 			}
+			selfID, err := getSelfID(opts)
+			if err != nil {
+				fmt.Println(err)
+				return 1
+			}
+
 			c := as.NewClient(opts...)
 			conn := <-c.Discover(as.BuiltinPublisher, "serviceLister")
+			if conn == nil {
+				fmt.Println(as.ErrServiceNotFound)
+				return 1
+			}
 			defer conn.Close()
 
 			var scopes [4][]*as.ServiceInfo
@@ -94,6 +120,9 @@ func main() {
 			if *verbose {
 				for _, services := range scopes {
 					for _, svc := range services {
+						if svc.ProviderID == selfID {
+							svc.ProviderID = "self"
+						}
 						fmt.Printf("PUBLISHER: %s\n", svc.Publisher)
 						fmt.Printf("SERVICE  : %s\n", svc.Service)
 						fmt.Printf("PROVIDER : %s\n", svc.ProviderID)
@@ -104,6 +133,9 @@ func main() {
 				list := make(map[string]*as.Scope)
 				for i, services := range scopes {
 					for _, svc := range services {
+						if svc.ProviderID == selfID {
+							svc.ProviderID = "self"
+						}
 						k := svc.Publisher + "_" + svc.Service + "_" + svc.ProviderID
 						p, has := list[k]
 						if !has {
@@ -114,14 +146,47 @@ func main() {
 						*p = *p | 1<<i
 					}
 				}
+				names := make([]string, 0, len(list))
+				for name := range list {
+					names = append(names, name)
+				}
+				sort.Strings(names)
 				fmt.Println("PUBLISHER           SERVICE             PROVIDER      WLOP(SCOPE)")
-				for svc, p := range list {
+				for _, svc := range names {
+					p := list[svc]
+					if p == nil {
+						panic("nil p")
+					}
 					ss := strings.Split(svc, "_")
 					fmt.Printf("%-18s  %-18s  %-12s  %4b\n", trimName(ss[0], 18), trimName(ss[1], 18), ss[2], *p)
 				}
 			}
 			return 0
 		}
+
+		cmds = append(cmds, subCmd{cmd, action})
+	}
+	{
+		cmd := flag.NewFlagSet("id", flag.ExitOnError)
+		cmd.SetOutput(os.Stdout)
+
+		debug := cmd.Bool("d", false, "enable debug")
+
+		action := func() int {
+			cmd.Parse(os.Args[2:])
+			var opts []as.Option
+			if *debug {
+				opts = append(opts, as.WithLogger(as.LoggerAll{}))
+			}
+			selfID, err := getSelfID(opts)
+			if err != nil {
+				fmt.Println(err)
+				return 1
+			}
+			fmt.Println(selfID)
+			return 0
+		}
+
 		cmds = append(cmds, subCmd{cmd, action})
 	}
 
