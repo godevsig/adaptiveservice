@@ -1,6 +1,7 @@
 package adaptiveservice
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -9,7 +10,6 @@ import (
 type Client struct {
 	*conf
 	discoverTimeout int // in seconds
-	localProviderID string
 }
 
 // NewClient creates a client which discovers services.
@@ -63,16 +63,17 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			expect = -1 // all
 			providerIDs = nil
 		}
-		if len(c.localProviderID) == 0 {
-			providerID, _ := discoverProviderID(c.lg)
-			if len(providerID) != 0 {
-				c.localProviderID = providerID
+		if len(c.providerID) == 0 {
+			providerID, err := discoverProviderID(c.lg)
+			if err != nil {
+				panic(fmt.Sprintf("provider ID not found: %v", err))
 			}
+			c.providerID = providerID
 		}
 	}
 
 	findWithinOS := func() int {
-		if !has(c.localProviderID) {
+		if !has(c.providerID) {
 			return 0
 		}
 		if c.scope&ScopeProcess == ScopeProcess {

@@ -2,54 +2,154 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"os"
+	"strings"
 
 	as "github.com/godevsig/adaptiveservice"
 )
 
+type subCmd struct {
+	*flag.FlagSet
+	action func() int
+}
+
+func trimName(name string, size int) string {
+	if len(name) > size {
+		name = name[:size-3] + "..."
+	}
+	return name
+}
+
 func main() {
-	var (
-		debug            bool
-		rootRegistry     bool
-		registryAddr     string
-		lanBroadcastPort string
-		reverseProxy     bool
-		serviceLister    bool
-	)
+	var cmds []subCmd
+	{
+		cmd := flag.NewFlagSet("server", flag.ExitOnError)
+		cmd.SetOutput(os.Stdout)
 
-	flag.BoolVar(&debug, "d", false, "enable debug")
-	flag.BoolVar(&rootRegistry, "root", false, "enable root registry service")
-	flag.BoolVar(&reverseProxy, "proxy", false, "enable reverse proxy service")
-	flag.BoolVar(&serviceLister, "lister", false, "enable service lister service")
-	flag.StringVar(&registryAddr, "registry", "", "root registry address")
-	flag.StringVar(&lanBroadcastPort, "bcast", "", "broadcast port for LAN")
+		debug := cmd.Bool("d", false, "enable debug")
+		rootRegistry := cmd.Bool("root", false, "enable root registry service")
+		reverseProxy := cmd.Bool("proxy", false, "enable reverse proxy service")
+		serviceLister := cmd.Bool("lister", false, "enable service lister service")
+		registryAddr := cmd.String("registry", "", "root registry address")
+		lanBroadcastPort := cmd.String("bcast", "", "broadcast port for LAN")
 
-	flag.Parse()
+		action := func() int {
+			cmd.Parse(os.Args[2:])
+			if len(*registryAddr) == 0 {
+				panic("root registry address not set")
+			}
+			if len(*lanBroadcastPort) == 0 {
+				panic("lan broadcast port not set")
+			}
 
-	if len(registryAddr) == 0 {
-		panic("root registry address not set")
+			var opts []as.Option
+			opts = append(opts, as.WithRegistryAddr(*registryAddr))
+			if *debug {
+				opts = append(opts, as.WithLogger(as.LoggerAll{}))
+			}
+
+			s := as.NewServer(opts...)
+			s.SetBroadcastPort(*lanBroadcastPort)
+
+			if *rootRegistry {
+				s.EnableRootRegistry()
+			}
+			if *reverseProxy {
+				s.EnableReverseProxy()
+			}
+			if *serviceLister {
+				s.EnableServiceLister()
+			}
+
+			s.Serve()
+			return 0
+		}
+		cmds = append(cmds, subCmd{cmd, action})
 	}
-	if len(lanBroadcastPort) == 0 {
-		panic("lan broadcast port not set")
+	{
+		cmd := flag.NewFlagSet("list", flag.ExitOnError)
+		cmd.SetOutput(os.Stdout)
+
+		debug := cmd.Bool("d", false, "enable debug")
+		verbose := cmd.Bool("v", false, "show verbose info")
+		publisher := cmd.String("p", "*", "publisher name, can be wildcard")
+		service := cmd.String("s", "*", "service name, can be wildcard")
+
+		action := func() int {
+			cmd.Parse(os.Args[2:])
+			var opts []as.Option
+			if *debug {
+				opts = append(opts, as.WithLogger(as.LoggerAll{}))
+			}
+			c := as.NewClient(opts...)
+			conn := <-c.Discover(as.BuiltinPublisher, "serviceLister")
+			defer conn.Close()
+
+			var scopes [4][]*as.ServiceInfo
+			if err := conn.SendRecv(&as.ListService{Publisher: *publisher, Service: *service}, &scopes); err != nil {
+				fmt.Println(err)
+				return 1
+			}
+			if *verbose {
+				for _, services := range scopes {
+					for _, svc := range services {
+						fmt.Printf("PUBLISHER: %s\n", svc.Publisher)
+						fmt.Printf("SERVICE  : %s\n", svc.Service)
+						fmt.Printf("PROVIDER : %s\n", svc.ProviderID)
+						fmt.Printf("ADDRESS  : %s\n\n", svc.Addr)
+					}
+				}
+			} else {
+				list := make(map[string]*as.Scope)
+				for i, services := range scopes {
+					for _, svc := range services {
+						k := svc.Publisher + "_" + svc.Service + "_" + svc.ProviderID
+						p, has := list[k]
+						if !has {
+							v := as.Scope(0)
+							p = &v
+							list[k] = p
+						}
+						*p = *p | 1<<i
+					}
+				}
+				fmt.Println("PUBLISHER           SERVICE             PROVIDER      WLOP(SCOPE)")
+				for svc, p := range list {
+					ss := strings.Split(svc, "_")
+					fmt.Printf("%-18s  %-18s  %-12s  %4b\n", trimName(ss[0], 18), trimName(ss[1], 18), ss[2], *p)
+				}
+			}
+			return 0
+		}
+		cmds = append(cmds, subCmd{cmd, action})
 	}
 
-	var opts []as.Option
-	opts = append(opts, as.WithRegistryAddr(registryAddr))
-	if debug {
-		opts = append(opts, as.WithLogger(as.LoggerAll{}))
+	usage := func(exitCode int) {
+		fmt.Println("COMMAND [OPTIONS]")
+		for _, cmd := range cmds {
+			fmt.Println(cmd.Name() + ":")
+			cmd.PrintDefaults()
+		}
+		os.Exit(exitCode)
 	}
 
-	s := as.NewServer(opts...)
-	s.SetBroadcastPort(lanBroadcastPort)
-
-	if rootRegistry {
-		s.EnableRootRegistry()
-	}
-	if reverseProxy {
-		s.EnableReverseProxy()
-	}
-	if serviceLister {
-		s.EnableServiceLister()
+	if len(os.Args) < 2 {
+		usage(1)
 	}
 
-	s.Serve()
+	str := os.Args[1]
+CMD:
+	switch str {
+	case "-h", "--help":
+		usage(0)
+	default:
+		for _, cmd := range cmds {
+			if str == cmd.Name() {
+				os.Exit(cmd.action())
+				break CMD
+			}
+		}
+		usage(1)
+	}
 }

@@ -3,7 +3,6 @@ package adaptiveservice
 import (
 	"io"
 	"net"
-	"strings"
 )
 
 const (
@@ -148,13 +147,21 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
 
 	onNewClientConnection := func(clientConn net.Conn) bool {
+		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
 			clientConn.Close()
 			return true
 		}
 		serverConn := <-chanServerConn
-		go io.Copy(serverConn, clientConn)
-		go io.Copy(clientConn, serverConn)
+		go func() {
+			io.Copy(serverConn, clientConn)
+			serverConn.Close()
+			s.lg.Debugf("io copy client => server done")
+		}()
+		go func() {
+			io.Copy(clientConn, serverConn)
+			s.lg.Debugf("io copy server => client done")
+		}()
 		return true
 	}
 
@@ -181,39 +188,30 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 //   "*" matches all
 //  "*bar*" matches bar, foobar, or foobarabc
 //  "foo*abc*" matches foobarabc, foobarabc123, or fooabc
-// "abc.org_echo.v1.0" matches exactly the service whose publisher
-// is "abc.org" and service is "echo.v1.0"
-//
-// Only at most one "_" is allowed.
-// The reply is []*ServiceInfo
+// The reply is [4][]*ServiceInfo
 type ListService struct {
-	name string
+	Publisher string
+	Service   string
 }
 
 // Handle handles ListService message.
 func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
 	s := stream.GetContext().(*Server)
-	var serviceInfos []*ServiceInfo
-
-	publisher, service := msg.name, msg.name
-	if strings.Contains(msg.name, "_") {
-		strs := strings.Split(msg.name, "_")
-		publisher, service = strs[0], strs[1]
-	}
+	var scopes [4][]*ServiceInfo
 
 	if s.scope&ScopeProcess == ScopeProcess {
-		serviceInfos = append(serviceInfos, queryServiceProcess(publisher, service)...)
+		scopes[0] = queryServiceProcess(msg.Publisher, msg.Service)
 	}
 	if s.scope&ScopeOS == ScopeOS {
-		serviceInfos = append(serviceInfos, queryServiceOS(publisher, service)...)
+		scopes[1] = queryServiceOS(msg.Publisher, msg.Service)
 	}
 	if s.scope&ScopeLAN == ScopeLAN {
-		serviceInfos = append(serviceInfos, queryServiceLAN(publisher, service, s.lg)...)
+		scopes[2] = queryServiceLAN(msg.Publisher, msg.Service, s.lg)
 	}
 	if s.scope&ScopeWAN == ScopeWAN {
-		serviceInfos = append(serviceInfos, queryServiceWAN(s.registryAddr, publisher, service, s.lg)...)
+		scopes[3] = queryServiceWAN(s.registryAddr, msg.Publisher, msg.Service, s.lg)
 	}
-	return serviceInfos
+	return scopes
 }
 
 // publishServiceListerService declares the lister service.
@@ -233,4 +231,5 @@ func init() {
 	RegisterType((*registerServiceForLAN)(nil))
 	RegisterType((*proxyRegServiceInWAN)(nil))
 	RegisterType((*ListService)(nil))
+	RegisterType([4][]*ServiceInfo{})
 }

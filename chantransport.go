@@ -178,7 +178,7 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) error {
 	rv.Set(reflect.ValueOf(tm.msg))
 
 	if tm.srcChan != nil {
-		if tm.srcChan != cs.privateChan {
+		if cs.privateChan != nil && cs.privateChan != tm.srcChan {
 			panic("private chan changed")
 		}
 		cs.privateChan = tm.srcChan

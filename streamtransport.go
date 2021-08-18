@@ -60,7 +60,7 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	svc.s.lg.Infof("service %s %s listening on %s", svc.publisherName, svc.serviceName, addr)
 
 	if svc.scope&ScopeLAN == ScopeLAN {
-		if err := regServiceLAN(svc, port, svc.s.lg); err != nil {
+		if err := svc.regServiceLAN(port); err != nil {
 			svc.s.lg.Warnf("service %s %s register to LAN failed: %v", svc.publisherName, svc.serviceName, err)
 			st.close()
 			return nil, err
@@ -69,9 +69,13 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	}
 
 	if svc.scope&ScopeWAN == ScopeWAN {
-		if err := regServiceWAN(svc, port); err != nil {
+		if err := svc.regServiceWAN(port); err != nil {
 			svc.s.lg.Infof("service %s %s can not register to WAN directly: %v", svc.publisherName, svc.serviceName, err)
-			c := NewClient(WithScope(ScopeLAN|ScopeWAN), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
+			c := NewClient(WithScope(ScopeLAN|ScopeWAN),
+				WithLogger(svc.s.lg),
+				WithRegistryAddr(svc.s.registryAddr),
+				WithProviderID(svc.s.providerID),
+			).SetDiscoverTimeout(0)
 			connChan := c.Discover(BuiltinPublisher, "reverseProxy", "*")
 			for conn := range connChan {
 				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID, port}, nil)
@@ -207,11 +211,28 @@ func (st *streamTransport) receiver() {
 	lnr := st.lnr
 
 	go func() {
+		rootRegistryIP, _, _ := net.SplitHostPort(st.svc.s.registryAddr)
+		pinged := false
+		if lnr.Addr().Network() == "unix" {
+			pinged = true
+		}
+		if st.svc.publisherName == BuiltinPublisher && st.svc.serviceName == "rootRegistry" {
+			pinged = true
+		}
 		for {
 			netconn, err := lnr.Accept()
 			if err != nil {
 				st.svc.s.errRecovers <- unrecoverableError{err}
 				return
+			}
+			if !pinged {
+				host, _, _ := net.SplitHostPort(netconn.RemoteAddr().String())
+				if host == rootRegistryIP {
+					netconn.Close()
+					pinged = true
+					lg.Debugf("ping from root registry")
+					continue
+				}
 			}
 			st.chanNetConn <- netconn
 		}
@@ -456,7 +477,7 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) error {
 	rv.Set(mrv)
 
 	if tm.dstChan != 0 {
-		if tm.dstChan != cs.dstChan {
+		if cs.dstChan != 0 && cs.dstChan != tm.dstChan {
 			panic("private chan changed")
 		}
 		cs.dstChan = tm.dstChan

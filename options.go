@@ -3,6 +3,7 @@ package adaptiveservice
 type conf struct {
 	lg           Logger
 	registryAddr string
+	providerID   string
 	scope        Scope
 	qsize        int
 }
@@ -29,6 +30,16 @@ func WithLogger(lg Logger) Option {
 func WithScope(scope Scope) Option {
 	return func(c *conf) {
 		c.scope = scope
+	}
+}
+
+// WithProviderID sets the provider ID which is used to identify service
+// in the network where there are multiple publisher_service instances
+// found in the registry.
+// Provider ID is usually shared by servers in the same network node.
+func WithProviderID(id string) Option {
+	return func(c *conf) {
+		c.providerID = id
 	}
 }
 

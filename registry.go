@@ -109,8 +109,8 @@ func lookupServiceUDS(publisherName, serviceName string) (addr string) {
 	return filename
 }
 
-func regServiceLAN(svc *service, port string, lg Logger) error {
-	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
+func (svc *service) regServiceLAN(port string) error {
+	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 	if conn == nil {
 		panic("LANRegistry not found")
@@ -145,8 +145,8 @@ func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs
 		return false
 	}
 	for _, provider := range serviceInfos {
-		if has(provider.providerID) {
-			addrs = append(addrs, provider.addr)
+		if has(provider.ProviderID) {
+			addrs = append(addrs, provider.Addr)
 		}
 	}
 	return
@@ -252,10 +252,10 @@ func (r *registryLAN) broadcast(msg interface{}) error {
 
 // ServiceInfo is service information.
 type ServiceInfo struct {
-	publisher  string
-	service    string
-	providerID string
-	addr       string // "192.168.0.11:12345"
+	Publisher  string
+	Service    string
+	ProviderID string
+	Addr       string // "192.168.0.11:12345"
 }
 
 type queryInLAN struct {
@@ -338,14 +338,27 @@ func (r *registryLAN) run() {
 	}
 
 	getServiceInfos := func(cmd *cmdLANQuery) {
-		prvds, has := serviceCache[cmd.name]
 		var serviceInfos []*ServiceInfo
-		if has {
+		walkProviders := func(prvds *providers, name string) {
+			ss := strings.Split(name, "_")
 			for pID, pInfo := range prvds.table {
-				svcInfo := &ServiceInfo{providerID: pID, addr: pInfo.addr}
+				svcInfo := &ServiceInfo{Publisher: ss[0], Service: ss[1], ProviderID: pID, Addr: pInfo.addr}
 				serviceInfos = append(serviceInfos, svcInfo)
 			}
 		}
+
+		if strings.Contains(cmd.name, "*") {
+			for name, prvds := range serviceCache {
+				if wildcardMatch(cmd.name, name) {
+					walkProviders(prvds, name)
+				}
+			}
+		} else {
+			if prvds, has := serviceCache[cmd.name]; has {
+				walkProviders(prvds, cmd.name)
+			}
+		}
+
 		cmd.chanServiceInfo <- serviceInfos
 	}
 
@@ -444,7 +457,7 @@ func (r *registryLAN) close() {
 	r.done = nil
 }
 
-func regServiceWAN(svc *service, port string) error {
+func (svc *service) regServiceWAN(port string) error {
 	c := NewClient(WithScope(ScopeWAN), WithLogger(svc.s.lg))
 	//c.init()
 	conn, err := c.newTCPConnection(svc.s.registryAddr)
@@ -485,8 +498,8 @@ func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs
 
 	serviceInfos := queryServiceWAN(c.registryAddr, publisherName, serviceName, c.lg)
 	for _, provider := range serviceInfos {
-		if has(provider.providerID) {
-			addrs = append(addrs, provider.addr)
+		if has(provider.ProviderID) {
+			addrs = append(addrs, provider.Addr)
 		}
 	}
 	return
@@ -506,7 +519,7 @@ type rootRegistry struct {
 func pingService(addr string) error {
 	conn, err := net.DialTimeout("tcp", addr, time.Second)
 	if err != nil {
-		return err
+		return ErrServiceNotReachable
 	}
 	conn.Close()
 	return nil
@@ -525,6 +538,11 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	ss := stream.(*streamServerStream)
 	rhost, _, _ := net.SplitHostPort(ss.netconn.RemoteAddr().String())
 
+	raddr := rhost + ":" + msg.port
+	if err := pingService(raddr); err != nil {
+		return err
+	}
+
 	name := msg.publisher + "_" + msg.service
 	rr.Lock()
 	pmap, has := rr.serviceMap[name]
@@ -532,16 +550,15 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 		pmap = &providerMap{
 			providers: make(map[string]*providerInfo),
 		}
+		rr.serviceMap[name] = pmap
 	}
 	rr.Unlock()
-	raddr := rhost + ":" + msg.port
-	if err := pingService(raddr); err != nil {
-		return err
-	}
+
 	pinfo := &providerInfo{time.Now(), raddr}
 	pmap.Lock()
 	pmap.providers[msg.providerID] = pinfo
 	pmap.Unlock()
+
 	return OK
 }
 
@@ -573,11 +590,11 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 					}
 					pInfo.timeStamp = t
 				}
-				svcInfo := &ServiceInfo{providerID: pID, addr: pInfo.addr}
+				svcInfo := &ServiceInfo{ProviderID: pID, Addr: pInfo.addr}
 				if len(service) != 0 {
 					ss := strings.Split(service, "_")
-					svcInfo.publisher = ss[0]
-					svcInfo.service = ss[1]
+					svcInfo.Publisher = ss[0]
+					svcInfo.Service = ss[1]
 				}
 				serviceInfos = append(serviceInfos, svcInfo)
 			}()

@@ -15,7 +15,6 @@ type Server struct {
 	sync.Mutex
 	*conf
 	publisher     string
-	providerID    string
 	broadcastPort string
 	rootRegistry  bool
 	reverseProxy  bool
@@ -159,13 +158,17 @@ func (s *Server) init() {
 		if s.rootRegistry {
 			scope |= ScopeWAN
 		}
-		if s.scope&scope != scope {
-			panic("scope error")
-		}
 		if err := s.publishReverseProxyService(scope); err != nil {
 			panic(err)
 		}
 		s.lg.Infof("reverse proxy started")
+	}
+
+	if s.serviceLister {
+		if err := s.publishServiceListerService(ScopeProcess | ScopeOS); err != nil {
+			panic(err)
+		}
+		s.lg.Infof("service lister started")
 	}
 	s.lg.Debugf("server initialized")
 }
@@ -208,8 +211,8 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 		return svc
 	}
 
-	if scope > s.scope {
-		panic("publishing in larger scope than allowed")
+	if s.scope&scope != scope {
+		panic("scope error")
 	}
 
 	if !s.initialized {
