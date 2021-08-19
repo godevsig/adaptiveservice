@@ -15,18 +15,18 @@ import (
 type Server struct {
 	sync.Mutex
 	*conf
-	publisher     string
-	broadcastPort string
-	rootRegistry  bool
-	reverseProxy  bool
-	serviceLister bool
-	errRecovers   chan errorRecover
-	mq            *msgQ
-	qWeight       int
-	qScale        int
-	msgTypeCheck  bool
-	closers       []closer
-	initialized   bool
+	publisher        string
+	broadcastPort    string
+	rootRegistry     bool
+	autoReverseProxy bool
+	serviceLister    bool
+	errRecovers      chan errorRecover
+	mq               *msgQ
+	qWeight          int
+	qScale           int
+	msgTypeCheck     bool
+	closers          []closer
+	initialized      bool
 }
 
 // NewServer creates a server which publishes services.
@@ -154,15 +154,61 @@ func (s *Server) init() {
 		s.lg.Infof("root registry started at %s", port)
 	}
 
-	if s.reverseProxy {
-		scope := ScopeLAN
-		if s.rootRegistry {
-			scope |= ScopeWAN
-		}
-		if err := s.publishReverseProxyService(scope); err != nil {
-			panic(err)
-		}
-		s.lg.Infof("reverse proxy started")
+	if s.autoReverseProxy {
+		func() {
+			network := 0
+			addrs, _ := net.InterfaceAddrs()
+			for _, addr := range addrs {
+				ip, _, _ := net.ParseCIDR(addr.String())
+				if ip.To4() != nil && !ip.IsLoopback() {
+					network++
+				}
+			}
+			if network < 2 {
+				s.lg.Debugf("reverse proxy not needed in less than 2 networks")
+				return
+			}
+
+			scope := ScopeLAN
+			if s.rootRegistry {
+				scope |= ScopeWAN
+			} else {
+				lnr, err := net.Listen("tcp", ":0")
+				if err != nil {
+					s.lg.Debugf("listen error: %v", err)
+					return
+				}
+				defer lnr.Close()
+				go func() {
+					for {
+						netconn, err := lnr.Accept()
+						if err != nil {
+							return
+						}
+						netconn.Close()
+					}
+				}()
+				addr := lnr.Addr().String()
+				_, port, _ := net.SplitHostPort(addr) // from [::]:43807
+
+				c := NewClient(WithScope(ScopeWAN), WithLogger(s.lg))
+				conn, err := c.newTCPConnection(s.registryAddr)
+				if err != nil {
+					s.lg.Debugf("root registry not reachable: %v", err)
+					return
+				}
+				defer conn.Close()
+				if err := conn.SendRecv(&testReverseProxy{port: port}, nil); err != nil {
+					s.lg.Debugf("reverse port not reachable: %v", err)
+					return
+				}
+			}
+
+			if err := s.publishReverseProxyService(scope); err != nil {
+				panic(err)
+			}
+			s.lg.Infof("reverse proxy started")
+		}()
 	}
 
 	if s.serviceLister {
@@ -299,5 +345,6 @@ func (s *Server) close() {
 	for _, closer := range s.closers {
 		closer.close()
 	}
+	s.errRecovers <- unrecoverableError{ErrServerClosed}
 	s.closers = nil
 }

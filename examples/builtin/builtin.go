@@ -71,7 +71,7 @@ func main() {
 				s.EnableRootRegistry()
 			}
 			if *reverseProxy {
-				s.EnableReverseProxy()
+				s.EnableAutoReverseProxy()
 			}
 			if *serviceLister {
 				s.EnableServiceLister()
@@ -126,7 +126,11 @@ func main() {
 						fmt.Printf("PUBLISHER: %s\n", svc.Publisher)
 						fmt.Printf("SERVICE  : %s\n", svc.Service)
 						fmt.Printf("PROVIDER : %s\n", svc.ProviderID)
-						fmt.Printf("ADDRESS  : %s\n\n", svc.Addr)
+						addr := svc.Addr
+						if addr[len(addr)-1] == 'P' {
+							addr = addr[:len(addr)-1] + "(proxied)"
+						}
+						fmt.Printf("ADDRESS  : %s\n\n", addr)
 					}
 				}
 			} else {

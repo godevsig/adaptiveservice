@@ -125,7 +125,11 @@ func (s *Server) publishReverseProxyService(scope Scope) error {
 		}))
 }
 
-type proxyRegServiceInWAN regServiceInWAN
+type proxyRegServiceInWAN struct {
+	publisher  string
+	service    string
+	providerID string
+}
 
 func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	s := stream.GetContext().(*Server)
@@ -147,9 +151,13 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	s.addCloser(reversetran)
 	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
 
+	var proxytran *streamTransport
 	onNewClientConnection := func(clientConn net.Conn) bool {
 		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
+			s.lg.Debugf("service lost, closing its proxy")
+			reversetran.close()
+			proxytran.close()
 			clientConn.Close()
 			return true
 		}
@@ -160,7 +168,9 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 			s.lg.Debugf("io copy client => server done")
 		}()
 		go func() {
+			clientConn.Write([]byte{0})
 			io.Copy(clientConn, serverConn)
+			clientConn.Close()
 			s.lg.Debugf("io copy server => client done")
 		}()
 		return true
@@ -175,7 +185,7 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 		fnOnNewConnection: onNewClientConnection,
 	}
 
-	proxytran, err := proxysvc.newTCPTransport("")
+	proxytran, err = proxysvc.newTCPTransport("")
 	if err != nil {
 		return err
 	}

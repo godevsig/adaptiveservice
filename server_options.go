@@ -41,9 +41,9 @@ func (s *Server) EnableRootRegistry() *Server {
 	return s
 }
 
-// EnableReverseProxy enables reverse proxy.
-func (s *Server) EnableReverseProxy() *Server {
-	s.reverseProxy = true
+// EnableAutoReverseProxy tries to enable reverse proxy.
+func (s *Server) EnableAutoReverseProxy() *Server {
+	s.autoReverseProxy = true
 	return s
 }
 

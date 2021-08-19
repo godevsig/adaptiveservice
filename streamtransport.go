@@ -78,7 +78,7 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 			).SetDiscoverTimeout(0)
 			connChan := c.Discover(BuiltinPublisher, "reverseProxy", "*")
 			for conn := range connChan {
-				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID, port}, nil)
+				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID}, nil)
 				if err == nil {
 					svc.s.lg.Infof("reverse proxy connected")
 					st.reverseProxyConn = conn
@@ -98,13 +98,15 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 }
 
 func (st *streamTransport) close() {
-	st.svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
-	st.lnr.Close()
-	if st.reverseProxyConn != nil {
-		st.reverseProxyConn.Close()
+	if st.done != nil {
+		st.svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
+		st.lnr.Close()
+		if st.reverseProxyConn != nil {
+			st.reverseProxyConn.Close()
+		}
+		close(st.done)
+		st.done = nil
 	}
-	close(st.done)
-	st.done = nil
 }
 
 type streamTransportMsg struct {
@@ -222,7 +224,7 @@ func (st *streamTransport) receiver() {
 		for {
 			netconn, err := lnr.Accept()
 			if err != nil {
-				st.svc.s.errRecovers <- unrecoverableError{err}
+				lg.Debugf("stream transport listener closed: %v", err)
 				return
 			}
 			if !pinged {
@@ -350,18 +352,31 @@ type streamConnection struct {
 	Stream
 	owner   *Client
 	netconn net.Conn
+	done    chan struct{}
 }
 
 func (c *Client) newStreamConnection(network string, addr string) (*streamConnection, error) {
+	proxied := false
+	if addr[len(addr)-1] == 'P' {
+		c.lg.Debugf("%s is proxied", addr)
+		addr = addr[:len(addr)-1]
+		proxied = true
+	}
 	netconn, err := net.Dial(network, addr)
 	if err != nil {
 		return nil, err
+	}
+	if proxied {
+		if _, err := netconn.Read([]byte{0}); err != nil {
+			return nil, err
+		}
 	}
 	c.lg.Debugf("stream connection established: %s -> %s", netconn.LocalAddr().String(), addr)
 
 	conn := &streamConnection{
 		owner:   c,
 		netconn: netconn,
+		done:    make(chan struct{}),
 	}
 
 	conn.Stream = conn.NewStream()
@@ -377,6 +392,7 @@ func (c *Client) newTCPConnection(addr string) (*streamConnection, error) {
 }
 
 func (conn *streamConnection) receiver() {
+	defer close(conn.done)
 	lg := conn.owner.lg
 	netconn := conn.netconn
 	dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
@@ -456,7 +472,13 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 }
 
 func (cs *streamClientStream) Recv(msgPtr interface{}) error {
-	tm := <-cs.selfChan
+	var tm *streamTransportMsg
+	select {
+	case <-cs.conn.done:
+		return ErrConnReset
+	case tm = <-cs.selfChan:
+	}
+
 	if err, ok := tm.msg.(error); ok { // message handler returned error
 		return err
 	}

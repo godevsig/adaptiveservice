@@ -86,6 +86,11 @@ var (
 	// It is either an unwanted known message or an unknown message
 	// with no route to message handler.
 	ErrBadMessage = errors.New("message not supported")
+	// ErrConnReset is an error where the connection was forced closed
+	// by peer.
+	ErrConnReset = errors.New("connection reset by peer")
+	// ErrServerClosed is an error where the server was closed by signal.
+	ErrServerClosed = errors.New("server closed by signal")
 )
 
 // Logger is the logger interface.

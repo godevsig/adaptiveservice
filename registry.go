@@ -189,6 +189,7 @@ type packetMsg struct {
 type providerInfo struct {
 	timeStamp time.Time
 	addr      string
+	proxied   bool
 }
 
 type providers struct {
@@ -444,7 +445,7 @@ func (r *registryLAN) run() {
 					prvds = &providers{t, make(map[string]*providerInfo)}
 					serviceCache[msg.name] = prvds
 				}
-				prvds.table[msg.providerID] = &providerInfo{t, rhost + ":" + msg.port}
+				prvds.table[msg.providerID] = &providerInfo{t, rhost + ":" + msg.port, false}
 			default:
 				panic(fmt.Sprintf("unknown msg: %v", msg))
 			}
@@ -459,19 +460,21 @@ func (r *registryLAN) close() {
 
 func (svc *service) regServiceWAN(port string) error {
 	c := NewClient(WithScope(ScopeWAN), WithLogger(svc.s.lg))
-	//c.init()
 	conn, err := c.newTCPConnection(svc.s.registryAddr)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	return conn.SendRecv(&regServiceInWAN{svc.publisherName, svc.serviceName, svc.providerID, port}, nil)
+	proxied := false
+	if svc.providerID != svc.s.providerID {
+		proxied = true
+	}
+	return conn.SendRecv(&regServiceInWAN{svc.publisherName, svc.serviceName, svc.providerID, port, proxied}, nil)
 }
 
 // support wildcard
 func queryServiceWAN(registryAddr, publisherName, serviceName string, lg Logger) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeWAN), WithLogger(lg))
-	//c.init()
 	conn, err := c.newTCPConnection(registryAddr)
 	if err != nil {
 		lg.Errorf("connect to registry failed: %v", err)
@@ -526,11 +529,28 @@ func pingService(addr string) error {
 }
 
 // reply OK or error
+type testReverseProxy struct {
+	port string
+}
+
+func (msg *testReverseProxy) Handle(stream ContextStream) (reply interface{}) {
+	ss := stream.(*streamServerStream)
+	rhost, _, _ := net.SplitHostPort(ss.netconn.RemoteAddr().String())
+
+	raddr := rhost + ":" + msg.port
+	if err := pingService(raddr); err != nil {
+		return err
+	}
+	return OK
+}
+
+// reply OK or error
 type regServiceInWAN struct {
 	publisher  string
 	service    string
 	providerID string
 	port       string
+	proxied    bool
 }
 
 func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
@@ -554,7 +574,7 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	}
 	rr.Unlock()
 
-	pinfo := &providerInfo{time.Now(), raddr}
+	pinfo := &providerInfo{time.Now(), raddr, msg.proxied}
 	pmap.Lock()
 	pmap.providers[msg.providerID] = pinfo
 	pmap.Unlock()
@@ -590,7 +610,11 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 					}
 					pInfo.timeStamp = t
 				}
-				svcInfo := &ServiceInfo{ProviderID: pID, Addr: pInfo.addr}
+				addr := pInfo.addr
+				if pInfo.proxied {
+					addr += "P"
+				}
+				svcInfo := &ServiceInfo{ProviderID: pID, Addr: addr}
 				if len(service) != 0 {
 					ss := strings.Split(service, "_")
 					svcInfo.Publisher = ss[0]
@@ -627,6 +651,7 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 func init() {
 	RegisterType((*regServiceInWAN)(nil))
 	RegisterType((*queryServiceInWAN)(nil))
+	RegisterType((*testReverseProxy)(nil))
 }
 
 func (s *Server) startRootRegistry(port string) error {
@@ -636,10 +661,10 @@ func (s *Server) startRootRegistry(port string) error {
 		providerID:    s.providerID,
 		knownMsgTypes: make(map[reflect.Type]struct{}),
 		s:             s,
-		//scope:         ScopeWAN,
 	}
 	svc.knownMsgTypes[reflect.TypeOf((*regServiceInWAN)(nil))] = struct{}{}
 	svc.knownMsgTypes[reflect.TypeOf((*queryServiceInWAN)(nil))] = struct{}{}
+	svc.knownMsgTypes[reflect.TypeOf((*testReverseProxy)(nil))] = struct{}{}
 
 	rr := &rootRegistry{
 		serviceMap: make(map[string]*providerMap),
