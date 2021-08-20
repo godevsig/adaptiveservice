@@ -15,20 +15,26 @@ func main() {
 	flag.BoolVar(&debug, "d", false, "enable debug")
 	flag.BoolVar(&serverMode, "s", false, "server mode")
 	flag.BoolVar(&clientMode, "c", false, "client mode")
+	clientCmd := flag.String("cmd", "", "client cmd in client mode")
 	flag.Parse()
 
-	var lg as.Logger = as.LoggerNull{}
+	var opts []as.Option
 	if debug {
-		lg = as.LoggerAll{}
+		opts = append(opts, as.WithLogger(as.LoggerAll{}))
 	}
 
 	if serverMode {
-		server.Run(lg)
+		server.Run(opts)
 	} else if clientMode {
-		client.Run(lg)
+		client.Run(*clientCmd, opts)
 	} else {
-		go server.Run(lg)
-		go client.Run(lg)
-		select {}
+		opts = append(opts, as.WithScope(as.ScopeProcess))
+		go client.Run(*clientCmd, opts)
+		done := make(chan struct{})
+		go func() {
+			server.Run(opts)
+			close(done)
+		}()
+		<-done
 	}
 }

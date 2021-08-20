@@ -13,13 +13,21 @@ func OnNewStreamFunc(fn func(Context)) ServiceOption {
 	}
 }
 
-// OnNewConnectionFunc sets a function which is called when new
-// incoming stream connection is established.
+// OnConnectFunc sets a function which is called when new
+// incoming connection is established.
 // The following message dispaching on this connection will stop
 // if fn returns true, leaving the connection NOT closed.
 // Only works for stream transport.
-func OnNewConnectionFunc(fn func(net.Conn) bool) ServiceOption {
+func OnConnectFunc(fn func(net.Conn) bool) ServiceOption {
 	return func(svc *service) {
-		svc.fnOnNewConnection = fn
+		svc.fnOnConnect = fn
+	}
+}
+
+// OnDisconnectFunc sets a function which is called when the connection
+// was disconnected.
+func OnDisconnectFunc(fn func(net.Conn)) ServiceOption {
+	return func(svc *service) {
+		svc.fnOnDisconnect = fn
 	}
 }

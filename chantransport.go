@@ -2,6 +2,8 @@ package adaptiveservice
 
 import (
 	"reflect"
+
+	"github.com/barkimedes/go-deepcopy"
 )
 
 type chanTransportMsg struct {
@@ -113,18 +115,23 @@ type chanClientStream struct {
 	privateChan chan *chanTransportMsg // opened by server message handler
 }
 
+type clientChanTransport struct {
+	owner *Client
+	ct    *chanTransport
+}
+
 // chan connection for client.
 type chanConnection struct {
 	Stream
-	ct         *chanTransport
+	cct        *clientChanTransport
 	serverChan chan *chanTransportMsg // link to server receive chan
 }
 
 // newConnection creates a new connection to the chan transport for client.
-func (ct *chanTransport) newConnection() *chanConnection {
+func (cct *clientChanTransport) newConnection() *chanConnection {
 	conn := &chanConnection{
-		ct:         ct,
-		serverChan: ct.recvChan,
+		cct:        cct,
+		serverChan: cct.ct.recvChan,
 	}
 
 	conn.Stream = conn.NewStream()
@@ -138,9 +145,9 @@ func (conn *chanConnection) NewStream() Stream {
 		ctx:      &contextImpl{},
 		selfChan: make(chan *chanTransportMsg, cap(conn.serverChan)),
 	}
-
-	if conn.ct.svc.fnOnNewStream != nil {
-		conn.ct.svc.fnOnNewStream(cs.ctx)
+	fnOnStream := conn.cct.ct.svc.fnOnNewStream
+	if fnOnStream != nil {
+		fnOnStream(cs.ctx)
 	}
 	return cs
 }
@@ -149,6 +156,9 @@ func (conn *chanConnection) Close() {}
 
 func (cs *chanClientStream) Send(msg interface{}) error {
 	if _, ok := msg.(KnownMessage); ok {
+		if cs.conn.cct.owner.deepCopy {
+			msg = deepcopy.MustAnything(msg)
+		}
 		cs.conn.serverChan <- &chanTransportMsg{ctx: cs.ctx, srcChan: cs.selfChan, msg: msg}
 		return nil
 	}
@@ -175,7 +185,11 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) error {
 		panic("not a pointer or nil pointer")
 	}
 	rv := rptr.Elem()
-	rv.Set(reflect.ValueOf(tm.msg))
+	mrv := reflect.ValueOf(tm.msg)
+	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
+		mrv = mrv.Elem()
+	}
+	rv.Set(mrv)
 
 	if tm.srcChan != nil {
 		if cs.privateChan != nil && cs.privateChan != tm.srcChan {

@@ -135,14 +135,14 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	s := stream.GetContext().(*Server)
 	chanServerConn := make(chan net.Conn)
 
-	onNewServerConnection := func(netconn net.Conn) bool {
+	onServerConnection := func(netconn net.Conn) bool {
 		chanServerConn <- netconn
 		return true
 	}
 
 	reversesvc := &service{
-		s:                 s,
-		fnOnNewConnection: onNewServerConnection,
+		s:           s,
+		fnOnConnect: onServerConnection,
 	}
 	reversetran, err := reversesvc.newTCPTransport("")
 	if err != nil {
@@ -152,7 +152,7 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
 
 	var proxytran *streamTransport
-	onNewClientConnection := func(clientConn net.Conn) bool {
+	onClientConnection := func(clientConn net.Conn) bool {
 		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
 			s.lg.Debugf("service lost, closing its proxy")
@@ -177,12 +177,12 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	}
 
 	proxysvc := &service{
-		publisherName:     msg.publisher,
-		serviceName:       msg.service,
-		providerID:        msg.providerID,
-		s:                 s,
-		scope:             ScopeWAN,
-		fnOnNewConnection: onNewClientConnection,
+		publisherName: msg.publisher,
+		serviceName:   msg.service,
+		providerID:    msg.providerID,
+		s:             s,
+		scope:         ScopeWAN,
+		fnOnConnect:   onClientConnection,
 	}
 
 	proxytran, err = proxysvc.newTCPTransport("")
@@ -194,8 +194,8 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	return OK
 }
 
-// ListService lists all services matching name which can
-// be wildcard:
+// ListService lists all services matching publisher/service name
+// which can be wildcard:
 //   "*" matches all
 //  "*bar*" matches bar, foobar, or foobarabc
 //  "foo*abc*" matches foobarabc, foobarabc123, or fooabc

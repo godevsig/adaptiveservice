@@ -221,14 +221,15 @@ func (s *Server) init() {
 }
 
 type service struct {
-	publisherName     string
-	serviceName       string
-	providerID        string
-	knownMsgTypes     map[reflect.Type]struct{}
-	s                 *Server
-	scope             Scope
-	fnOnNewStream     func(Context)
-	fnOnNewConnection func(net.Conn) bool
+	publisherName  string
+	serviceName    string
+	providerID     string
+	knownMsgTypes  map[reflect.Type]struct{}
+	s              *Server
+	scope          Scope
+	fnOnNewStream  func(Context)       // called on new stream accepted
+	fnOnConnect    func(net.Conn) bool // called on new connection established
+	fnOnDisconnect func(net.Conn)
 }
 
 func (svc *service) canHandle(msg interface{}) bool {
@@ -300,7 +301,7 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 // knownMessages are messages that the service can handle, e.g.
 // []KnownMessage{(*PublicStructA)(nil), (*PublicStructB)(nil), ...},
 // where (*PublicStructA) and (*PublicStructB) are the known messages that
-// have Handle(stream ContextStream) (reply interface{}, err error) method.
+// have Handle(stream ContextStream) reply interface{} method.
 func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
 	if strings.ContainsAny(serviceName, "_/") {
 		panic("serviceName should not contain _ or /")

@@ -2,7 +2,9 @@
 //
 // Servers define micro services identified as name of "publisher_service" and
 // publish them to all available scopes:
-// in same process, and further in same OS, and then further in same network.
+// in same process, and further in same OS, and then further in same local
+// network, and then public network where a public root registry address needs
+// to be configured.
 // In process and OS scope, one service name can only be announced once,
 // duplicated service name is treated as error.
 // In network scope, there can be multiple services with the same name,
@@ -11,7 +13,7 @@
 //
 // Clients then discover wanted micro services in a way that shortest scope comes
 // first. The discover() API returns a connection channel, reading the channel the
-// client will get one or more connections, with each connection represents a connection
+// client will get one or more connections, with each represents a connection
 // to one of the service providers providing the wanted micro service.
 // The connection then can be used to send/receive messages to/from the service provider.
 //
@@ -35,6 +37,10 @@
 // the message is then being handled.
 // Clients do not define Handle() method, they just send and receive message
 // in a natural synchronized fashion.
+//
+// Services that are behind NAT can be auto proxied by the builtin reverseProxy
+// service provided by the daemon server in the local network or by the root
+// registry.
 package adaptiveservice
 
 import (
@@ -44,6 +50,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
 	"sync"
 	"syscall"
@@ -217,7 +224,9 @@ func initSigCleaner(lg Logger) {
 
 // RegisterType registers the type infomation to encoding sub system.
 func RegisterType(i interface{}) {
-	gotiny.Register(i)
+	rt := reflect.TypeOf(i)
+	gotiny.RegisterName(rt.String(), rt)
+	//gotiny.Register(i)
 }
 
 func init() {

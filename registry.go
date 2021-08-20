@@ -64,11 +64,14 @@ func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*Ser
 	return
 }
 
-func lookupServiceChan(publisherName, serviceName string) *chanTransport {
+func (c *Client) lookupServiceChan(publisherName, serviceName string) *clientChanTransport {
 	name := publisherName + "_" + serviceName
 	chanRegistry.RLock()
 	defer chanRegistry.RUnlock()
-	return chanRegistry.table[name]
+	if ct, has := chanRegistry.table[name]; has {
+		return &clientChanTransport{c, ct}
+	}
+	return nil
 }
 
 // support wildcard

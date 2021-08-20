@@ -10,6 +10,7 @@ import (
 type Client struct {
 	*conf
 	discoverTimeout int // in seconds
+	deepCopy        bool
 }
 
 // NewClient creates a client which discovers services.
@@ -32,11 +33,11 @@ func NewClient(options ...Option) *Client {
 // Each connection represents a connection to one of the service providers
 // providing the wanted micro service.
 //
-// Use providerIDs to select target providers only.
+// Use providerIDs to select target providers.
 // If no provider id presents, discover searches scopes by distance and returns
 // only one connection towards the found service which may have been randomly selected
-// if more than one services found.
-// If any of the provider ids is "*", discover will return all available
+// if more than one services were found.
+// If any of the provider ids is "*", discover will return all currently available
 // connections of the wanted service.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {
 	connections := make(chan Connection)
@@ -77,9 +78,9 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			return 0
 		}
 		if c.scope&ScopeProcess == ScopeProcess {
-			ct := lookupServiceChan(publisher, service)
-			if ct != nil {
-				connections <- ct.newConnection()
+			cct := c.lookupServiceChan(publisher, service)
+			if cct != nil {
+				connections <- cct.newConnection()
 				c.lg.Debugf("channel transport connected")
 				return 1
 			}

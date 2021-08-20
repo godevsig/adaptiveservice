@@ -11,11 +11,8 @@ import (
 )
 
 // Run runs the client.
-func Run(lg as.Logger) {
-	var opts []as.Option
-	opts = append(opts, as.WithLogger(lg))
-
-	c := as.NewClient(opts...)
+func Run(cmd string, opts []as.Option) {
+	c := as.NewClient(opts...).SetDeepCopy()
 	conn := <-c.Discover("example.org", "echo.v1.0")
 	if conn == nil {
 		fmt.Println(as.ErrServiceNotFound)
@@ -23,35 +20,73 @@ func Run(lg as.Logger) {
 	}
 	defer conn.Close()
 
+	if cmd == "whoelse" {
+		go func() {
+			eventStream := conn.NewStream()
+			if err := eventStream.Send(echo.SubWhoElseEvent{}); err != nil {
+				fmt.Println(err)
+				return
+			}
+			for {
+				var addr string
+				if err := eventStream.Recv(&addr); err != nil {
+					fmt.Println(err)
+					return
+				}
+				fmt.Printf("event: new client %s\n", addr)
+			}
+		}()
+
+		for i := 0; i < 200; i++ {
+			var whoelse string
+			if err := conn.SendRecv(echo.WhoElse{}, &whoelse); err != nil {
+				fmt.Println(err)
+				return
+			}
+			fmt.Printf("clients: %s\n", whoelse)
+			time.Sleep(3 * time.Second)
+		}
+		return
+	}
+
 	var rep echo.MessageReply
 	req := echo.MessageRequest{
 		Msg: "ni hao",
-		Num: 100,
+		Num: 0,
 	}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 9; i++ {
 		req.Num += 100
 		if err := conn.SendRecv(&req, &rep); err != nil {
 			fmt.Println(err)
+			return
 		}
 		fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
-		time.Sleep(time.Second)
+		//time.Sleep(time.Second)
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 			stream := conn.NewStream()
 			req := echo.MessageRequest{
 				Msg: "ni hao",
-				Num: 10 * int32(i),
+				Num: 100 * int32(i),
 			}
 			var rep echo.MessageReply
-			if err := stream.SendRecv(&req, &rep); err != nil {
-				fmt.Println(err)
+			for i := 0; i < 90; i++ {
+				req.Num += 10
+				if err := stream.SendRecv(&req, &rep); err != nil {
+					fmt.Println(err)
+					return
+				}
+				if req.Num+1 != rep.Num {
+					panic("wrong number")
+				}
+				fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
+				//time.Sleep(time.Second)
 			}
-			fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
 		}(i)
 	}
 	wg.Wait()

@@ -11,3 +11,16 @@ func (c *Client) SetDiscoverTimeout(timeout int) *Client {
 	c.discoverTimeout = timeout
 	return c
 }
+
+// SetDeepCopy sets the client to deep copy the message before sending it out.
+// This option is only useful for process scope where by default the server
+// can modify the message that the client owns because server and client in
+// the same process space, and this case only happens when the message handler
+// in the server has reference receiver.
+//
+// Unexported fields in the message are not copied but set to zero value.
+// Default is zero copy.
+func (c *Client) SetDeepCopy() *Client {
+	c.deepCopy = true
+	return c
+}

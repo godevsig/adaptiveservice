@@ -241,13 +241,19 @@ func (st *streamTransport) receiver() {
 	}()
 
 	handleConn := func(netconn net.Conn) {
-		if st.svc.fnOnNewConnection != nil {
-			lg.Debugf("%s %s on new connection", st.svc.publisherName, st.svc.serviceName)
-			if st.svc.fnOnNewConnection(netconn) {
+		if st.svc.fnOnConnect != nil {
+			lg.Debugf("%s %s on connect", st.svc.publisherName, st.svc.serviceName)
+			if st.svc.fnOnConnect(netconn) {
 				return
 			}
 		}
-		defer netconn.Close()
+		defer func() {
+			if st.svc.fnOnDisconnect != nil {
+				lg.Debugf("%s %s on disconnect", st.svc.publisherName, st.svc.serviceName)
+				st.svc.fnOnDisconnect(netconn)
+			}
+			netconn.Close()
+		}()
 		ssMap := make(map[uint64]*streamServerStream)
 		dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
 		bufSize := make([]byte, 4)
