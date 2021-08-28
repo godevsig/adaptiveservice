@@ -3,6 +3,7 @@ package adaptiveservice
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -37,8 +38,9 @@ func NewClient(options ...Option) *Client {
 // If no provider id presents, discover searches scopes by distance and returns
 // only one connection towards the found service which may have been randomly selected
 // if more than one services were found.
-// If any of the provider ids is "*", discover will return all currently available
-// connections of the wanted service.
+// If any of publisher or service or provider ids is "*", discover will return
+// all currently available connections of the wanted service(s). Make sure to close
+// ALL the connections it returns.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {
 	connections := make(chan Connection)
 
@@ -72,38 +74,46 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			c.providerID = providerID
 		}
 	}
+	if strings.Contains(publisher+service, "*") {
+		expect = -1
+	}
 
-	findWithinOS := func() int {
+	findWithinOS := func() (found int) {
 		if !has(c.providerID) {
 			return 0
 		}
 		if c.scope&ScopeProcess == ScopeProcess {
-			cct := c.lookupServiceChan(publisher, service)
-			if cct != nil {
+			ccts := c.lookupServiceChan(publisher, service)
+			for _, cct := range ccts {
 				connections <- cct.newConnection()
 				c.lg.Debugf("channel transport connected")
-				return 1
+				found++
+				if found == expect {
+					return
+				}
 			}
 		}
 		if c.scope&ScopeOS == ScopeOS {
-			addr := lookupServiceUDS(publisher, service)
-			if len(addr) != 0 {
+			addrs := lookupServiceUDS(publisher, service)
+			for _, addr := range addrs {
 				conn, err := c.newUDSConnection(addr)
 				if err != nil {
 					c.lg.Errorf("dial " + addr + " failed")
 				} else {
 					connections <- conn
 					c.lg.Debugf("unix domain socket connected to: %s", addr)
-					return 1
+					found++
+					if found == expect {
+						return
+					}
 				}
 			}
 		}
-		return 0
+		return
 	}
 
-	findNetwork := func(expect int) int {
+	findNetwork := func(expect int) (found int) {
 		var addrs []string
-		found := 0
 
 		connect := func() {
 			for len(addrs) != 0 && found != expect {
@@ -156,7 +166,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			if timeout == 0 {
 				break
 			}
-			c.lg.Debugf("waiting for service")
+			c.lg.Debugf("waiting for service: %s_%s", publisher, service)
 			time.Sleep(time.Second)
 			timeout--
 		}

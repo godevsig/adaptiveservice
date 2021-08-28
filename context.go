@@ -2,20 +2,10 @@ package adaptiveservice
 
 import (
 	"reflect"
-	"sync"
 )
 
 // Context represents a context.
 type Context interface {
-	// sync.RWMutex.Lock
-	Lock()
-	// sync.RWMutex.Unlock
-	Unlock()
-	// sync.RWMutex.RLock
-	RLock()
-	// sync.RWMutex.RUnlock
-	RUnlock()
-
 	// PutVar puts value v to the underlying map overriding the old value of the same type.
 	PutVar(v interface{})
 
@@ -36,7 +26,6 @@ type Context interface {
 }
 
 type contextImpl struct {
-	sync.RWMutex
 	kv  map[reflect.Type]interface{}
 	ctx interface{}
 }

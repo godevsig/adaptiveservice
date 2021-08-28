@@ -101,7 +101,8 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 		case mm := <-mq.getEgressChan():
 			st.working()
 			reply := mm.msg.Handle(mm.stream)
-			mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
+			//mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
+			mq.lg.Debugf("message: %T handled, reply: %T", mm.msg, reply)
 			if reply != nil {
 				mm.stream.sendNoPrivate(reply)
 			}
@@ -149,7 +150,8 @@ func (mq *msgQ) putMetaMsg(mm *metaKnownMsg) {
 	}
 
 	if _, ok := mm.msg.(HighPriorityMessage); ok {
-		mq.lg.Debugf("msgq high priority message received: %#v", mm.msg)
+		//mq.lg.Debugf("msgq high priority message received: %#v", mm.msg)
+		mq.lg.Debugf("msgq high priority message received: %T", mm.msg)
 		if mq.ingressHighChan == nil {
 			initChan(&mq.ingressHighChan)
 			mq.lg.Debugf("msgq ingress high priority chan initialized")
@@ -158,7 +160,8 @@ func (mq *msgQ) putMetaMsg(mm *metaKnownMsg) {
 		return
 	}
 	if _, ok := mm.msg.(LowPriorityMessage); ok {
-		mq.lg.Debugf("msgq low priority message received: %#v", mm.msg)
+		//mq.lg.Debugf("msgq low priority message received: %#v", mm.msg)
+		mq.lg.Debugf("msgq low priority message received: %T", mm.msg)
 		if mq.ingressLowChan == nil {
 			initChan(&mq.ingressLowChan)
 			mq.lg.Debugf("msgq ingress low priority chan initialized")
@@ -167,7 +170,8 @@ func (mq *msgQ) putMetaMsg(mm *metaKnownMsg) {
 		return
 	}
 
-	mq.lg.Debugf("msgq normal priority message received: %#v", mm.msg)
+	//mq.lg.Debugf("msgq normal priority message received: %#v", mm.msg)
+	mq.lg.Debugf("msgq normal priority message received: %T", mm.msg)
 	mq.ingressNormalChan <- mm
 }
 

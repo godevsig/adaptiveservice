@@ -224,17 +224,9 @@ func initSigCleaner(lg Logger) {
 
 // RegisterType registers the type infomation to encoding sub system.
 func RegisterType(i interface{}) {
+	//gotiny.Register(i)
 	rt := reflect.TypeOf(i)
 	gotiny.RegisterName(rt.String(), rt)
-	//gotiny.Register(i)
-}
-
-func init() {
-	rand.Seed(time.Now().UnixNano())
-	RegisterType(errors.New(""))
-	RegisterType(fmt.Errorf("%w", io.EOF))
-	RegisterType("")
-	RegisterType(0)
 }
 
 // test if pattern matches str
@@ -265,4 +257,61 @@ func wildcardMatch(pattern, str string) bool {
 		pos += index + len(substr)
 	}
 	return true
+}
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+	// basic types
+	RegisterType(int(0))
+	RegisterType(int8(0))
+	RegisterType(int16(0))
+	RegisterType(int32(0))
+	RegisterType(int64(0))
+	RegisterType(uint(0))
+	RegisterType(uint8(0))
+	RegisterType(uint16(0))
+	RegisterType(uint32(0))
+	RegisterType(uint64(0))
+	RegisterType(float32(0))
+	RegisterType(float64(0))
+	RegisterType(complex64(0i))
+	RegisterType(complex128(0i))
+	RegisterType(uintptr(0))
+	RegisterType(false)
+	RegisterType("")
+	//RegisterType([]byte(nil))
+	RegisterType([]int(nil))
+	RegisterType([]int8(nil))
+	RegisterType([]int16(nil))
+	RegisterType([]int32(nil))
+	RegisterType([]int64(nil))
+	RegisterType([]uint(nil))
+	RegisterType([]uint8(nil))
+	RegisterType([]uint16(nil))
+	RegisterType([]uint32(nil))
+	RegisterType([]uint64(nil))
+	RegisterType([]float32(nil))
+	RegisterType([]float64(nil))
+	RegisterType([]complex64(nil))
+	RegisterType([]complex128(nil))
+	RegisterType([]uintptr(nil))
+	RegisterType([]bool(nil))
+	RegisterType([]string(nil))
+	// error types
+	RegisterType(errors.New(""))
+	RegisterType(fmt.Errorf("%w", io.EOF))
+}
+
+// Dummy annotation marking that the value x escapes,
+// for use in cases where the reflect code is so clever that
+// the compiler cannot follow.
+func escapes(x interface{}) {
+	if dummy.b {
+		dummy.x = x
+	}
+}
+
+var dummy struct {
+	b bool
+	x interface{}
 }

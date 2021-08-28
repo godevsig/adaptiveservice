@@ -1,5 +1,21 @@
 package adaptiveservice
 
+import (
+	"io"
+	"net"
+)
+
+// Netconn is the underlying net connection.
+type Netconn interface {
+	// Close closes the connection.
+	// Any blocked Read or Write operations will be unblocked and return errors.
+	Close() error
+	// LocalAddr returns the local network address.
+	LocalAddr() net.Addr
+	// RemoteAddr returns the remote network address.
+	RemoteAddr() net.Addr
+}
+
 // Connection is the connection between client and server.
 type Connection interface {
 	// default stream.
@@ -13,6 +29,7 @@ type Connection interface {
 // Stream is an independent channel multiplexed from the underlying connection.
 // Used for client side.
 type Stream interface {
+	io.ReadWriter
 	// Send sends a message to the stream peer.
 	Send(msg interface{}) error
 

@@ -37,17 +37,14 @@ func regServiceChan(publisherName, serviceName string, ct *chanTransport) {
 	chanRegistry.table[name] = ct
 }
 
-// support wildcard
-func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
+func serviceNamesInProcess(publisherName, serviceName string) (names []string) {
 	name := publisherName + "_" + serviceName
 	if strings.Contains(name, "*") {
 		chanRegistry.RLock()
 		for ctname := range chanRegistry.table {
 			chanRegistry.RUnlock()
 			if wildcardMatch(name, ctname) {
-				strs := strings.Split(ctname, "_")
-				sInfo := &ServiceInfo{strs[0], strs[1], "self", "internal"}
-				serviceInfos = append(serviceInfos, sInfo)
+				names = append(names, ctname)
 			}
 			chanRegistry.RLock()
 		}
@@ -57,46 +54,34 @@ func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*Ser
 		ct := chanRegistry.table[name]
 		chanRegistry.RUnlock()
 		if ct != nil {
-			sInfo := &ServiceInfo{publisherName, serviceName, "self", "internal"}
-			serviceInfos = append(serviceInfos, sInfo)
+			names = append(names, name)
 		}
 	}
 	return
 }
 
-func (c *Client) lookupServiceChan(publisherName, serviceName string) *clientChanTransport {
-	name := publisherName + "_" + serviceName
-	chanRegistry.RLock()
-	defer chanRegistry.RUnlock()
-	if ct, has := chanRegistry.table[name]; has {
-		return &clientChanTransport{c, ct}
+// support wildcard
+func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
+	names := serviceNamesInProcess(publisherName, serviceName)
+	for _, name := range names {
+		strs := strings.Split(name, "_")
+		sInfo := &ServiceInfo{strs[0], strs[1], "self", "internal"}
+		serviceInfos = append(serviceInfos, sInfo)
 	}
-	return nil
+	return
 }
 
 // support wildcard
-func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
-	name := publisherName + "_" + serviceName
-	if strings.Contains(name, "*") {
-		sockets, _ := filepath.Glob(udsRegistryDir + "*_*.sock")
-		for _, socket := range sockets {
-			s := strings.TrimPrefix(socket, udsRegistryDir)
-			s = strings.TrimSuffix(s, ".sock")
-			strs := strings.Split(s, "_")
-			if wildcardMatch(name, s) {
-				sInfo := &ServiceInfo{strs[0], strs[1], "self", socket}
-				serviceInfos = append(serviceInfos, sInfo)
-			}
+func (c *Client) lookupServiceChan(publisherName, serviceName string) (ccts []*clientChanTransport) {
+	names := serviceNamesInProcess(publisherName, serviceName)
+	for _, name := range names {
+		chanRegistry.RLock()
+		ct := chanRegistry.table[name]
+		chanRegistry.RUnlock()
+		if ct != nil {
+			ccts = append(ccts, &clientChanTransport{c, ct})
 		}
-	} else {
-		socket := udsRegistryDir + name + ".sock"
-		if _, err := os.Stat(socket); os.IsNotExist(err) {
-			return
-		}
-		sInfo := &ServiceInfo{publisherName, serviceName, "self", socket}
-		serviceInfos = append(serviceInfos, sInfo)
 	}
-
 	return
 }
 
@@ -104,12 +89,45 @@ func addrUDS(publisherName, serviceName string) (addr string) {
 	return udsRegistryDir + publisherName + "_" + serviceName + ".sock"
 }
 
-func lookupServiceUDS(publisherName, serviceName string) (addr string) {
-	filename := addrUDS(publisherName, serviceName)
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		return
+func serviceNamesInOS(publisherName, serviceName string) (names []string) {
+	name := publisherName + "_" + serviceName
+	if strings.Contains(name, "*") {
+		sockets, _ := filepath.Glob(udsRegistryDir + "*_*.sock")
+		for _, socket := range sockets {
+			s := strings.TrimPrefix(socket, udsRegistryDir)
+			s = strings.TrimSuffix(s, ".sock")
+			if wildcardMatch(name, s) {
+				names = append(names, s)
+			}
+		}
+	} else {
+		socket := udsRegistryDir + name + ".sock"
+		if _, err := os.Stat(socket); os.IsNotExist(err) {
+			return
+		}
+		names = append(names, name)
 	}
-	return filename
+	return
+}
+
+// support wildcard
+func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
+	names := serviceNamesInOS(publisherName, serviceName)
+	for _, name := range names {
+		strs := strings.Split(name, "_")
+		sInfo := &ServiceInfo{strs[0], strs[1], "self", udsRegistryDir + name + ".sock"}
+		serviceInfos = append(serviceInfos, sInfo)
+	}
+	return
+}
+
+// support wildcard
+func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
+	names := serviceNamesInOS(publisherName, serviceName)
+	for _, name := range names {
+		addrs = append(addrs, udsRegistryDir+name+".sock")
+	}
+	return
 }
 
 func (svc *service) regServiceLAN(port string) error {

@@ -135,8 +135,8 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	s := stream.GetContext().(*Server)
 	chanServerConn := make(chan net.Conn)
 
-	onServerConnection := func(netconn net.Conn) bool {
-		chanServerConn <- netconn
+	onServerConnection := func(netconn Netconn) bool {
+		chanServerConn <- netconn.(net.Conn)
 		return true
 	}
 
@@ -152,7 +152,8 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
 
 	var proxytran *streamTransport
-	onClientConnection := func(clientConn net.Conn) bool {
+	onClientConnection := func(netconn Netconn) bool {
+		clientConn := netconn.(net.Conn)
 		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
 			s.lg.Debugf("service lost, closing its proxy")
@@ -194,15 +195,16 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	return OK
 }
 
-// ListService lists all services matching publisher/service name
-// which can be wildcard:
+// ListService lists all services in specified scopes matching
+// publisher/service name which can be wildcard:
 //   "*" matches all
 //  "*bar*" matches bar, foobar, or foobarabc
 //  "foo*abc*" matches foobarabc, foobarabc123, or fooabc
 // The reply is [4][]*ServiceInfo
 type ListService struct {
-	Publisher string
-	Service   string
+	TargetScope Scope
+	Publisher   string
+	Service     string
 }
 
 // Handle handles ListService message.
@@ -210,16 +212,16 @@ func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
 	s := stream.GetContext().(*Server)
 	var scopes [4][]*ServiceInfo
 
-	if s.scope&ScopeProcess == ScopeProcess {
+	if msg.TargetScope&s.scope&ScopeProcess == ScopeProcess {
 		scopes[0] = queryServiceProcess(msg.Publisher, msg.Service)
 	}
-	if s.scope&ScopeOS == ScopeOS {
+	if msg.TargetScope&s.scope&ScopeOS == ScopeOS {
 		scopes[1] = queryServiceOS(msg.Publisher, msg.Service)
 	}
-	if s.scope&ScopeLAN == ScopeLAN {
+	if msg.TargetScope&s.scope&ScopeLAN == ScopeLAN {
 		scopes[2] = queryServiceLAN(msg.Publisher, msg.Service, s.lg)
 	}
-	if s.scope&ScopeWAN == ScopeWAN {
+	if msg.TargetScope&s.scope&ScopeWAN == ScopeWAN {
 		scopes[3] = queryServiceWAN(s.registryAddr, msg.Publisher, msg.Service, s.lg)
 	}
 	return scopes

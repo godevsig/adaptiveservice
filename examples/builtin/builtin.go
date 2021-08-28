@@ -112,8 +112,9 @@ func main() {
 			}
 			defer conn.Close()
 
+			msg := as.ListService{TargetScope: as.ScopeAll, Publisher: *publisher, Service: *service}
 			var scopes [4][]*as.ServiceInfo
-			if err := conn.SendRecv(&as.ListService{Publisher: *publisher, Service: *service}, &scopes); err != nil {
+			if err := conn.SendRecv(&msg, &scopes); err != nil {
 				fmt.Println(err)
 				return 1
 			}

@@ -6,7 +6,8 @@ type KnownMessage interface {
 	// Handle handles the message.
 	// If reply is nil, no message will be sent back.
 	// If reply is error type, the error will be sent back to the stream peer
-	// as error, otherwise reply will be sent back as return value.
+	// as error, otherwise reply will be sent back as return value. In particular,
+	// if reply is io.EOF, the stream will be closed.
 	//
 	// The message may be marshaled or compressed.
 	// Remember in golang assignment to interface is also value copy,

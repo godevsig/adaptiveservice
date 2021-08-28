@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"net"
 	"sync/atomic"
 	"time"
 
@@ -81,7 +80,7 @@ type sessionInfo struct {
 	mgr         *statMgr
 }
 
-func (mgr *statMgr) onConnect(netconn net.Conn) bool {
+func (mgr *statMgr) onConnect(netconn as.Netconn) bool {
 	raddr := netconn.RemoteAddr().String()
 	fmt.Println("on connect from:", raddr)
 	mgr.Lock()
@@ -99,7 +98,7 @@ func (mgr *statMgr) onConnect(netconn net.Conn) bool {
 	return false
 }
 
-func (mgr *statMgr) onDisconnect(netconn net.Conn) {
+func (mgr *statMgr) onDisconnect(netconn as.Netconn) {
 	raddr := netconn.RemoteAddr().String()
 	fmt.Println("on disconnect from:", raddr)
 	mgr.Lock()

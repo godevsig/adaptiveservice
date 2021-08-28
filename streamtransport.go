@@ -5,6 +5,8 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/niubaoshu/gotiny"
@@ -12,7 +14,7 @@ import (
 
 type streamTransport struct {
 	svc              *service
-	done             chan struct{}
+	closed           chan struct{}
 	lnr              net.Listener
 	reverseProxyConn Connection
 	chanNetConn      chan net.Conn
@@ -21,18 +23,18 @@ type streamTransport struct {
 func makeStreamTransport(svc *service, lnr net.Listener) *streamTransport {
 	return &streamTransport{
 		svc:         svc,
-		done:        make(chan struct{}),
+		closed:      make(chan struct{}),
 		lnr:         lnr,
 		chanNetConn: make(chan net.Conn, 8),
 	}
 }
 
 func (svc *service) newUDSTransport() (*streamTransport, error) {
-	addr := lookupServiceUDS(svc.publisherName, svc.serviceName)
-	if len(addr) != 0 {
-		panic(addr + " already exists")
+	addrs := lookupServiceUDS(svc.publisherName, svc.serviceName)
+	if len(addrs) != 0 {
+		panic("socket already exists")
 	}
-	addr = addrUDS(svc.publisherName, svc.serviceName)
+	addr := addrUDS(svc.publisherName, svc.serviceName)
 	lnr, err := net.Listen("unix", addr)
 	if err != nil {
 		return nil, err
@@ -85,7 +87,12 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 					go st.reverseReceiver()
 					break
 				}
+				conn.Close()
 			}
+			for conn := range connChan {
+				conn.Close()
+			}
+
 			if st.reverseProxyConn == nil {
 				svc.s.lg.Warnf("service %s %s register to proxy failed", svc.publisherName, svc.serviceName)
 				st.close()
@@ -98,14 +105,14 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 }
 
 func (st *streamTransport) close() {
-	if st.done != nil {
+	if st.closed != nil {
 		st.svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
 		st.lnr.Close()
 		if st.reverseProxyConn != nil {
 			st.reverseProxyConn.Close()
 		}
-		close(st.done)
-		st.done = nil
+		close(st.closed)
+		st.closed = nil
 	}
 }
 
@@ -117,22 +124,41 @@ type streamTransportMsg struct {
 
 type streamServerStream struct {
 	Context
+	mtx         *sync.Mutex
 	lg          Logger
 	netconn     net.Conn
+	connClose   chan struct{}
 	privateChan chan *streamTransportMsg // dedicated to the client
 	qsize       int
 	dstChan     uint64
 	enc         *gotiny.Encoder
+	encMainCopy int32
+	rbuff       []byte
 }
 
 func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	buf := net.Buffers{}
-	// ToDo: use sync.Pool for encoder buf
-	bufMsg := ss.enc.Encode(tm)
+	mainCopy := false
+	if atomic.CompareAndSwapInt32(&ss.encMainCopy, 0, 1) {
+		ss.lg.Debugf("enc main copy")
+		mainCopy = true
+	}
+	enc := ss.enc
+	if !mainCopy {
+		enc = enc.Copy()
+	}
+	bufMsg := enc.Encode(tm)
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
 	ss.lg.Debugf("stream server send: tm: %#v ==> size %d, buf %v <%s>", tm, len(bufMsg), bufMsg, bufMsg)
+	ss.mtx.Lock()
+	defer func() {
+		if mainCopy {
+			atomic.StoreInt32(&ss.encMainCopy, 0)
+		}
+		ss.mtx.Unlock()
+	}()
 	if _, err := buf.WriteTo(ss.netconn); err != nil {
 		return err
 	}
@@ -140,13 +166,16 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 }
 
 func (ss *streamServerStream) sendNoPrivate(msg interface{}) error {
+	if ss.connClose == nil {
+		return io.EOF
+	}
 	tm := streamTransportMsg{dstChan: ss.dstChan, msg: msg}
 	return ss.send(&tm)
 }
 
 func (ss *streamServerStream) Send(msg interface{}) error {
-	if ss.privateChan == nil {
-		ss.privateChan = make(chan *streamTransportMsg, ss.qsize)
+	if ss.connClose == nil {
+		return io.EOF
 	}
 	srcChan := uint64(uintptr(unsafe.Pointer(&ss.privateChan)))
 	tm := streamTransportMsg{srcChan: srcChan, dstChan: ss.dstChan, msg: msg}
@@ -154,8 +183,8 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 }
 
 func (ss *streamServerStream) Recv(msgPtr interface{}) error {
-	if ss.privateChan == nil {
-		panic("private chan not established")
+	if ss.connClose == nil {
+		return io.EOF
 	}
 	rptr := reflect.ValueOf(msgPtr)
 	if rptr.Kind() != reflect.Ptr || rptr.IsNil() {
@@ -163,13 +192,19 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) error {
 	}
 
 	rv := rptr.Elem()
-	tm := <-ss.privateChan
-	ss.lg.Debugf("stream server recv: tm: %#v", tm)
-	mrv := reflect.ValueOf(tm.msg)
-	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
-		mrv = mrv.Elem()
+	select {
+	case <-ss.connClose:
+		ss.connClose = nil
+		return io.EOF
+	case tm := <-ss.privateChan:
+		ss.lg.Debugf("stream server recv: tm: %#v", tm)
+		mrv := reflect.ValueOf(tm.msg)
+		if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
+			mrv = mrv.Elem()
+		}
+		rv.Set(mrv)
 	}
-	rv.Set(mrv)
+
 	return nil
 }
 
@@ -181,6 +216,24 @@ func (ss *streamServerStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}
 		return err
 	}
 	return nil
+}
+
+func (ss *streamServerStream) Write(p []byte) (n int, err error) {
+	if err := ss.Send(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (ss *streamServerStream) Read(p []byte) (n int, err error) {
+	if len(ss.rbuff) == 0 {
+		if err := ss.Recv(&ss.rbuff); err != nil {
+			return 0, err
+		}
+	}
+	n = copy(p, ss.rbuff)
+	ss.rbuff = ss.rbuff[n:]
+	return
 }
 
 func (st *streamTransport) reverseReceiver() {
@@ -241,25 +294,32 @@ func (st *streamTransport) receiver() {
 	}()
 
 	handleConn := func(netconn net.Conn) {
+		lg.Debugf("%s %s new stream connection from: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
 		if st.svc.fnOnConnect != nil {
 			lg.Debugf("%s %s on connect", st.svc.publisherName, st.svc.serviceName)
 			if st.svc.fnOnConnect(netconn) {
 				return
 			}
 		}
+
+		connClose := make(chan struct{})
 		defer func() {
 			if st.svc.fnOnDisconnect != nil {
 				lg.Debugf("%s %s on disconnect", st.svc.publisherName, st.svc.serviceName)
 				st.svc.fnOnDisconnect(netconn)
 			}
+			lg.Debugf("%s %s stream connection disconnected: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
+			close(connClose)
 			netconn.Close()
 		}()
+		var mtx sync.Mutex
 		ssMap := make(map[uint64]*streamServerStream)
 		dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
+		dec.SetCopyMode()
 		bufSize := make([]byte, 4)
 		bufMsg := make([]byte, 512)
 		for {
-			if st.done == nil {
+			if st.closed == nil {
 				return
 			}
 			if _, err := io.ReadFull(netconn, bufSize); err != nil {
@@ -289,17 +349,21 @@ func (st *streamTransport) receiver() {
 				}()
 				dec.Decode(bufMsg, &tm)
 			}()
-			lg.Debugf("stream server receiver: tm: %#v", tm)
+			lg.Debugf("stream server receiver: tm src 0x%x, dst 0x%x", tm.srcChan, tm.dstChan)
 
 			ss := ssMap[tm.srcChan]
 			if ss == nil {
+				qsize := st.svc.s.qsize
 				ss = &streamServerStream{
-					lg:      lg,
-					Context: &contextImpl{},
-					netconn: netconn,
-					qsize:   st.svc.s.qsize,
-					dstChan: tm.srcChan,
-					enc:     gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
+					Context:     &contextImpl{},
+					mtx:         &mtx,
+					lg:          lg,
+					netconn:     netconn,
+					connClose:   connClose,
+					privateChan: make(chan *streamTransportMsg, qsize),
+					qsize:       qsize,
+					dstChan:     tm.srcChan,
+					enc:         gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 				}
 				ssMap[tm.srcChan] = ss
 				if st.svc.fnOnNewStream != nil {
@@ -308,10 +372,10 @@ func (st *streamTransport) receiver() {
 				}
 			}
 
-			if knownMsg, ok := tm.msg.(KnownMessage); ok {
+			if st.svc.canHandle(tm.msg) {
 				mm := &metaKnownMsg{
 					stream: ss,
-					msg:    knownMsg,
+					msg:    tm.msg.(KnownMessage),
 				}
 				mq.putMetaMsg(mm)
 			} else if tm.dstChan != 0 {
@@ -335,10 +399,9 @@ func (st *streamTransport) receiver() {
 
 	for {
 		select {
-		case <-st.done:
+		case <-st.closed:
 			return
 		case netconn := <-st.chanNetConn:
-			lg.Debugf("%s %s new connection from: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
 			go handleConn(netconn)
 		}
 	}
@@ -347,18 +410,21 @@ func (st *streamTransport) receiver() {
 // below for client side
 
 type streamClientStream struct {
-	conn     *streamConnection
-	selfChan chan *streamTransportMsg
-	dstChan  uint64
-	enc      *gotiny.Encoder
+	conn        *streamConnection
+	selfChan    chan *streamTransportMsg
+	dstChan     uint64
+	encMainCopy int32
+	enc         *gotiny.Encoder
+	rbuff       []byte
 }
 
 // stream connection for client.
 type streamConnection struct {
 	Stream
+	sync.Mutex
 	owner   *Client
 	netconn net.Conn
-	done    chan struct{}
+	closed  chan struct{}
 }
 
 func (c *Client) newStreamConnection(network string, addr string) (*streamConnection, error) {
@@ -382,7 +448,7 @@ func (c *Client) newStreamConnection(network string, addr string) (*streamConnec
 	conn := &streamConnection{
 		owner:   c,
 		netconn: netconn,
-		done:    make(chan struct{}),
+		closed:  make(chan struct{}),
 	}
 
 	conn.Stream = conn.NewStream()
@@ -398,10 +464,11 @@ func (c *Client) newTCPConnection(addr string) (*streamConnection, error) {
 }
 
 func (conn *streamConnection) receiver() {
-	defer close(conn.done)
+	defer close(conn.closed)
 	lg := conn.owner.lg
 	netconn := conn.netconn
 	dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
+	dec.SetCopyMode()
 	bufSize := make([]byte, 4)
 	bufMsg := make([]byte, 512)
 	for {
@@ -424,8 +491,16 @@ func (conn *streamConnection) receiver() {
 		lg.Debugf("stream client receiver: size: %d, bufMsg: %v <%s>", size, bufMsg, bufMsg)
 
 		var tm streamTransportMsg
-		dec.Decode(bufMsg, &tm)
-		lg.Debugf("stream client receiver: tm: %#v", tm)
+		//escapes(&tm)
+		func() {
+			defer func() {
+				if err := recover(); err != nil {
+					lg.Errorf("unknown message: %v", err)
+				}
+			}()
+			dec.Decode(bufMsg, &tm)
+		}()
+		lg.Debugf("stream client receiver: tm src 0x%x, dst 0x%x", tm.srcChan, tm.dstChan)
 
 		if tm.dstChan != 0 {
 			func() {
@@ -456,21 +531,43 @@ func (conn *streamConnection) Close() {
 }
 
 func (cs *streamClientStream) Send(msg interface{}) error {
-	_, ok := msg.(KnownMessage)
-	if !ok && cs.dstChan == 0 {
-		return ErrBadMessage
+	if cs.selfChan == nil {
+		return io.EOF
+	}
+	if _, ok := msg.([]byte); !ok {
+		if _, ok := msg.(KnownMessage); !ok {
+			if cs.dstChan == 0 {
+				return ErrBadMessage
+			}
+		}
 	}
 
 	srcChan := uint64(uintptr(unsafe.Pointer(&cs.selfChan)))
 	tm := streamTransportMsg{srcChan: srcChan, dstChan: cs.dstChan, msg: msg}
 
+	lg := cs.conn.owner.lg
 	buf := net.Buffers{}
-	// ToDo: use sync.Pool for encoder buf
-	bufMsg := cs.enc.Encode(&tm)
+	mainCopy := false
+	if atomic.CompareAndSwapInt32(&cs.encMainCopy, 0, 1) {
+		lg.Debugf("enc main copy")
+		mainCopy = true
+	}
+	enc := cs.enc
+	if !mainCopy {
+		enc = enc.Copy()
+	}
+	bufMsg := enc.Encode(&tm)
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
-	cs.conn.owner.lg.Debugf("stream client send: tm: %#v ==> size %d, buf %v <%s>", tm, len(bufMsg), bufMsg, bufMsg)
+	lg.Debugf("stream client send: tm: %#v ==> size %d, buf %v <%s>", tm, len(bufMsg), bufMsg, bufMsg)
+	cs.conn.Lock()
+	defer func() {
+		if mainCopy {
+			atomic.StoreInt32(&cs.encMainCopy, 0)
+		}
+		cs.conn.Unlock()
+	}()
 	if _, err := buf.WriteTo(cs.conn.netconn); err != nil {
 		return err
 	}
@@ -478,16 +575,22 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 }
 
 func (cs *streamClientStream) Recv(msgPtr interface{}) error {
+	if cs.selfChan == nil {
+		return io.EOF
+	}
 	var tm *streamTransportMsg
 	select {
-	case <-cs.conn.done:
+	case <-cs.conn.closed:
 		return ErrConnReset
 	case tm = <-cs.selfChan:
 	}
-
 	if err, ok := tm.msg.(error); ok { // message handler returned error
+		if err == io.EOF {
+			cs.selfChan = nil
+		}
 		return err
 	}
+
 	cs.conn.owner.lg.Debugf("stream client recv: tm: %#v", tm)
 	rptr := reflect.ValueOf(msgPtr)
 	kind := rptr.Kind()
@@ -522,4 +625,22 @@ func (cs *streamClientStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}
 		return err
 	}
 	return nil
+}
+
+func (cs *streamClientStream) Write(p []byte) (n int, err error) {
+	if err := cs.Send(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (cs *streamClientStream) Read(p []byte) (n int, err error) {
+	if len(cs.rbuff) == 0 {
+		if err := cs.Recv(&cs.rbuff); err != nil {
+			return 0, err
+		}
+	}
+	n = copy(p, cs.rbuff)
+	cs.rbuff = cs.rbuff[n:]
+	return
 }

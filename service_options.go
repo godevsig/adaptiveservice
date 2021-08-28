@@ -1,7 +1,5 @@
 package adaptiveservice
 
-import "net"
-
 // ServiceOption is option for service.
 type ServiceOption func(*service)
 
@@ -17,8 +15,7 @@ func OnNewStreamFunc(fn func(Context)) ServiceOption {
 // incoming connection is established.
 // The following message dispaching on this connection will stop
 // if fn returns true, leaving the connection NOT closed.
-// Only works for stream transport.
-func OnConnectFunc(fn func(net.Conn) bool) ServiceOption {
+func OnConnectFunc(fn func(Netconn) bool) ServiceOption {
 	return func(svc *service) {
 		svc.fnOnConnect = fn
 	}
@@ -26,7 +23,7 @@ func OnConnectFunc(fn func(net.Conn) bool) ServiceOption {
 
 // OnDisconnectFunc sets a function which is called when the connection
 // was disconnected.
-func OnDisconnectFunc(fn func(net.Conn)) ServiceOption {
+func OnDisconnectFunc(fn func(Netconn)) ServiceOption {
 	return func(svc *service) {
 		svc.fnOnDisconnect = fn
 	}

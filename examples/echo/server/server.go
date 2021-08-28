@@ -23,13 +23,18 @@ func Run(opts []as.Option) {
 		clients:     make(map[string]struct{}),
 		subscribers: make(map[chan string]struct{}),
 	}
-	s.Publish("echo.v1.0",
+	if err := s.Publish("echo.v1.0",
 		echoKnownMsgs,
 		as.OnNewStreamFunc(mgr.onNewStream),
 		as.OnConnectFunc(mgr.onConnect),
 		as.OnDisconnectFunc(mgr.onDisconnect),
-	)
+	); err != nil {
+		fmt.Println(err)
+		return
+	}
 
-	s.Serve() // ctrl+c to exit
+	if err := s.Serve(); err != nil { // ctrl+c to exit
+		fmt.Println(err)
+	}
 	fmt.Printf("echo server has served %d requests\n", mgr.counter)
 }
