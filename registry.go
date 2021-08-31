@@ -277,7 +277,7 @@ type ServiceInfo struct {
 	Publisher  string
 	Service    string
 	ProviderID string
-	Addr       string // "192.168.0.11:12345"
+	Addr       string // "192.168.0.11:12345", "192.168.0.11:12345P" if proxied
 }
 
 type queryInLAN struct {
@@ -675,6 +675,23 @@ func init() {
 	RegisterType((*testReverseProxy)(nil))
 }
 
+func (s *Server) registryCheckSaver() {
+	for {
+		time.Sleep(time.Minute)
+		svcs := queryServiceWAN(s.registryAddr, "*", "*", s.lg)
+		f, err := os.Create("services.record.updating")
+		if err != nil {
+			s.lg.Errorf("root registry: record file not created: %v", err)
+			return
+		}
+		for _, si := range svcs {
+			fmt.Fprintf(f, "%s %s %s %s\n", si.Publisher, si.Service, si.ProviderID, si.Addr)
+		}
+		f.Close()
+		os.Rename("services.record.updating", "services.record")
+	}
+}
+
 func (s *Server) startRootRegistry(port string) error {
 	svc := &service{
 		publisherName: BuiltinPublisher,
@@ -689,6 +706,29 @@ func (s *Server) startRootRegistry(port string) error {
 
 	rr := &rootRegistry{
 		serviceMap: make(map[string]*providerMap),
+	}
+	f, err := os.Open("services.record")
+	if err == nil {
+		for {
+			var publisher, service, providerID, addr string
+			_, err := fmt.Fscanln(f, &publisher, &service, &providerID, &addr)
+			if err != nil {
+				break
+			}
+			name := publisher + "_" + service
+			pmap := rr.serviceMap[name]
+			if pmap == nil {
+				pmap = &providerMap{providers: make(map[string]*providerInfo)}
+				rr.serviceMap[name] = pmap
+			}
+			pinfo := &providerInfo{time.Now(), addr, false}
+			if addr[len(addr)-1] == 'P' {
+				pinfo.addr = addr[:len(addr)-1]
+				pinfo.proxied = true
+			}
+			pmap.providers[providerID] = pinfo
+		}
+		f.Close()
 	}
 	svc.fnOnNewStream = func(ctx Context) {
 		ctx.SetContext(rr)

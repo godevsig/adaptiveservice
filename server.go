@@ -2,10 +2,10 @@ package adaptiveservice
 
 import (
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -53,14 +53,17 @@ func genID() string {
 
 	itfs, _ := net.Interfaces()
 	for _, itf := range itfs {
+		dev, err := os.Readlink("/sys/class/net/" + itf.Name)
+		if err != nil || strings.Contains(dev, "virtual") {
+			continue
+		}
 		if len(itf.HardwareAddr) != 0 {
 			b = itf.HardwareAddr
 			break
 		}
 	}
 
-	m := binary.BigEndian.Uint32(b[:4])
-	if len(b) == 0 || m == 0x0242ac11 {
+	if len(b) == 0 {
 		b = make([]byte, 6)
 		rand.Read(b)
 	}
@@ -151,6 +154,8 @@ func (s *Server) init() {
 		if err := s.startRootRegistry(port); err != nil {
 			panic(err)
 		}
+
+		go s.registryCheckSaver()
 		s.lg.Infof("root registry started at %s", port)
 	}
 
