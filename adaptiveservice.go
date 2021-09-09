@@ -208,8 +208,9 @@ func addSigCloser(c closer) {
 func initSigCleaner(lg Logger) {
 	sigOnce.Do(func() {
 		// handle signal
+		signal.Ignore(syscall.SIGHUP)
 		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
 			sig := <-sigChan
 			lg.Warnf("signal: %s", sig.String())
