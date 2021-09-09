@@ -2,6 +2,7 @@ package adaptiveservice
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"reflect"
@@ -32,7 +33,7 @@ func makeStreamTransport(svc *service, lnr net.Listener) *streamTransport {
 func (svc *service) newUDSTransport() (*streamTransport, error) {
 	addrs := lookupServiceUDS(svc.publisherName, svc.serviceName)
 	if len(addrs) != 0 {
-		panic("socket already exists")
+		return nil, fmt.Errorf("socket already exists: %v", addrs)
 	}
 	addr := addrUDS(svc.publisherName, svc.serviceName)
 	lnr, err := net.Listen("unix", addr)
