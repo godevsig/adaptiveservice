@@ -3,6 +3,7 @@ package adaptiveservice
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -72,9 +73,9 @@ func genID() string {
 	return id
 }
 
-func (s *Server) init() {
+func (s *Server) init() error {
 	if s.initialized {
-		return
+		return nil
 	}
 	s.initialized = true
 	initSigCleaner(s.lg)
@@ -88,12 +89,12 @@ func (s *Server) init() {
 				s.providerID = genID()
 			}
 			if err := s.publishProviderInfoService(); err != nil {
-				panic(err)
+				return err
 			}
 			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
 		} else {
 			if len(s.providerID) != 0 && id != s.providerID {
-				panic(fmt.Sprintf("conflict provider ID: %s => %s ?", id, s.providerID))
+				return fmt.Errorf("conflict provider ID: %s => %s ?", id, s.providerID)
 			}
 			s.providerID = id
 			s.lg.Infof("discovered provider ID: %s", s.providerID)
@@ -102,40 +103,35 @@ func (s *Server) init() {
 
 	if s.scope&ScopeLAN == ScopeLAN {
 		s.lg.Infof("configing server in local network scope")
-		func() {
-			c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
-			conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
-			if conn != nil {
-				conn.Close()
-				s.lg.Infof("LAN registry running")
-				return
+		c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
+		conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
+		if conn != nil {
+			conn.Close()
+			s.lg.Infof("LAN registry running")
+		} else {
+			if len(s.broadcastPort) == 0 {
+				return errors.New("LAN registry not found or configured")
 			}
-
-			if len(s.broadcastPort) != 0 {
-				if err := s.publishLANRegistryService(); err != nil {
-					panic(err)
-				}
-				s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.broadcastPort)
-			} else {
-				panic("LAN registry not found or configured")
+			if err := s.publishLANRegistryService(); err != nil {
+				return err
 			}
-		}()
+			s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.broadcastPort)
+		}
 	}
 
 	if s.scope&ScopeWAN == ScopeWAN {
 		s.lg.Infof("configing server in public network scope")
 		if addr, err := discoverRegistryAddr(s.lg); err != nil {
-			if len(s.registryAddr) != 0 {
-				if err := s.publishRegistryInfoService(); err != nil {
-					panic(err)
-				}
-				s.lg.Infof("user specified root registry address: %s, registry info service started", s.registryAddr)
-			} else {
-				panic("root registry address not found or configured")
+			if len(s.registryAddr) == 0 {
+				return errors.New("root registry address not found or configured")
 			}
+			if err := s.publishRegistryInfoService(); err != nil {
+				return err
+			}
+			s.lg.Infof("user specified root registry address: %s, registry info service started", s.registryAddr)
 		} else {
 			if len(s.registryAddr) != 0 && addr != s.registryAddr {
-				panic(fmt.Sprintf("conflict root registry address: %s => %s ?", addr, s.registryAddr))
+				return fmt.Errorf("conflict root registry address: %s => %s ?", addr, s.registryAddr)
 			}
 			s.registryAddr = addr
 			s.lg.Infof("discovered root registry address: %s", addr)
@@ -147,12 +143,12 @@ func (s *Server) init() {
 			panic("scope error")
 		}
 		if len(s.registryAddr) == 0 {
-			panic("root registry address not configured")
+			return errors.New("root registry address not configured")
 		}
 
 		_, port, _ := net.SplitHostPort(s.registryAddr)
 		if err := s.startRootRegistry(port); err != nil {
-			panic(err)
+			return err
 		}
 
 		go s.registryCheckSaver()
@@ -160,7 +156,11 @@ func (s *Server) init() {
 	}
 
 	if s.autoReverseProxy {
-		func() {
+		canProxy := func() bool {
+			if s.rootRegistry {
+				return true
+			}
+
 			network := 0
 			addrs, _ := net.InterfaceAddrs()
 			for _, addr := range addrs {
@@ -171,58 +171,61 @@ func (s *Server) init() {
 			}
 			if network < 2 {
 				s.lg.Debugf("reverse proxy not needed in less than 2 networks")
-				return
+				return false
 			}
 
+			lnr, err := net.Listen("tcp", ":0")
+			if err != nil {
+				s.lg.Debugf("auto reverse proxy: listen error: %v", err)
+				return false
+			}
+			defer lnr.Close()
+			go func() {
+				for {
+					netconn, err := lnr.Accept()
+					if err != nil {
+						return
+					}
+					netconn.Close()
+				}
+			}()
+			addr := lnr.Addr().String()
+			_, port, _ := net.SplitHostPort(addr) // from [::]:43807
+
+			c := NewClient(WithScope(ScopeWAN), WithLogger(s.lg))
+			conn, err := c.newTCPConnection(s.registryAddr)
+			if err != nil {
+				s.lg.Debugf("root registry not reachable: %v", err)
+				return false
+			}
+			defer conn.Close()
+			if err := conn.SendRecv(&testReverseProxy{port: port}, nil); err != nil {
+				s.lg.Debugf("reverse port not reachable: %v", err)
+				return false
+			}
+			return true
+		}
+
+		if canProxy() {
 			scope := ScopeLAN
 			if s.rootRegistry {
 				scope |= ScopeWAN
-			} else {
-				lnr, err := net.Listen("tcp", ":0")
-				if err != nil {
-					s.lg.Debugf("listen error: %v", err)
-					return
-				}
-				defer lnr.Close()
-				go func() {
-					for {
-						netconn, err := lnr.Accept()
-						if err != nil {
-							return
-						}
-						netconn.Close()
-					}
-				}()
-				addr := lnr.Addr().String()
-				_, port, _ := net.SplitHostPort(addr) // from [::]:43807
-
-				c := NewClient(WithScope(ScopeWAN), WithLogger(s.lg))
-				conn, err := c.newTCPConnection(s.registryAddr)
-				if err != nil {
-					s.lg.Debugf("root registry not reachable: %v", err)
-					return
-				}
-				defer conn.Close()
-				if err := conn.SendRecv(&testReverseProxy{port: port}, nil); err != nil {
-					s.lg.Debugf("reverse port not reachable: %v", err)
-					return
-				}
 			}
-
 			if err := s.publishReverseProxyService(scope); err != nil {
-				panic(err)
+				return err
 			}
 			s.lg.Infof("reverse proxy started")
-		}()
+		}
 	}
 
 	if s.serviceLister {
 		if err := s.publishServiceListerService(ScopeProcess | ScopeOS); err != nil {
-			panic(err)
+			return err
 		}
 		s.lg.Infof("service lister started")
 	}
 	s.lg.Debugf("server initialized")
+	return nil
 }
 
 type service struct {
@@ -269,7 +272,9 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	}
 
 	if !s.initialized {
-		s.init()
+		if err := s.init(); err != nil {
+			return err
+		}
 	}
 
 	svc := newService()
@@ -317,7 +322,9 @@ func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, optio
 // Serve starts serving.
 func (s *Server) Serve() error {
 	if !s.initialized {
-		s.init()
+		if err := s.init(); err != nil {
+			return err
+		}
 	}
 	defer s.close()
 	s.lg.Infof("server in serve")

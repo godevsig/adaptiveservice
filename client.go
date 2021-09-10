@@ -83,6 +83,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			return 0
 		}
 		if c.scope&ScopeProcess == ScopeProcess {
+			c.lg.Debugf("find %s_%s in ScopeProcess", publisher, service)
 			ccts := c.lookupServiceChan(publisher, service)
 			for _, cct := range ccts {
 				connections <- cct.newConnection()
@@ -94,6 +95,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			}
 		}
 		if c.scope&ScopeOS == ScopeOS {
+			c.lg.Debugf("find %s_%s in ScopeOS", publisher, service)
 			addrs := lookupServiceUDS(publisher, service)
 			for _, addr := range addrs {
 				conn, err := c.newUDSConnection(addr)
@@ -134,10 +136,12 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		}
 
 		if found != expect && c.scope&ScopeLAN == ScopeLAN {
+			c.lg.Debugf("find %s_%s in ScopeLAN", publisher, service)
 			addrs = c.lookupServiceLAN(publisher, service, providerIDs...)
 			connect()
 		}
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
+			c.lg.Debugf("find %s_%s in ScopeWAN", publisher, service)
 			if len(c.registryAddr) == 0 {
 				if addr, err := discoverRegistryAddr(c.lg); err != nil {
 					panic("registry address not found or configured")

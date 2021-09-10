@@ -399,7 +399,7 @@ func (r *registryLAN) run() {
 				wait := false
 				t := time.Now()
 				if strings.Contains(cmd.name, "*") {
-					if wildcardQuery != cmd.name || t.After(wildcardQueryTime.Add(5*time.Second)) {
+					if wildcardQuery != cmd.name || t.After(wildcardQueryTime.Add(15*time.Second)) {
 						for name, prvds := range serviceCache {
 							if wildcardMatch(cmd.name, name) {
 								for pID, pInfo := range prvds.table {
@@ -420,7 +420,7 @@ func (r *registryLAN) run() {
 					}
 				} else {
 					prvds, has := serviceCache[cmd.name]
-					if !has || t.After(prvds.timeStamp.Add(5*time.Second)) {
+					if !has || t.After(prvds.timeStamp.Add(15*time.Second)) {
 						if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
 							lg.Warnf("lan registry send broadcast error: %v", err)
 							break
@@ -432,7 +432,7 @@ func (r *registryLAN) run() {
 					}
 				}
 				if wait {
-					time.AfterFunc(time.Second, func() { chanDelay <- cmd })
+					time.AfterFunc(100*time.Millisecond, func() { chanDelay <- cmd })
 				} else {
 					getServiceInfos(cmd)
 				}
