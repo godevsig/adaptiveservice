@@ -214,16 +214,22 @@ type providerInfo struct {
 }
 
 type providers struct {
-	timeStamp time.Time                // last update time
-	table     map[string]*providerInfo // {"providerID1":{time, "192.168.0.11:12345"}, {time, "providerID2":"192.168.0.26:33556"}}
+	table map[string]*providerInfo // {"providerID1":{time, "192.168.0.11:12345"}, {time, "providerID2":"192.168.0.26:33556"}}
+}
+
+type serviceInfoTime struct {
+	timeStamp time.Time // last update time
+	si        []*ServiceInfo
 }
 
 type registryLAN struct {
 	s          *Server
 	packetConn net.PacketConn
 	infoLANs   []*infoLAN
-	done       chan struct{}
-	cmdChan    chan interface{}
+	sync.RWMutex
+	serviceInfoCache map[string]*serviceInfoTime
+	done             chan struct{}
+	cmdChan          chan interface{}
 }
 
 func (s *Server) newLANRegistry() (*registryLAN, error) {
@@ -249,11 +255,12 @@ func (s *Server) newLANRegistry() (*registryLAN, error) {
 	}
 
 	r := &registryLAN{
-		s:          s,
-		packetConn: packetConn,
-		infoLANs:   infoLANs,
-		done:       make(chan struct{}),
-		cmdChan:    make(chan interface{}),
+		s:                s,
+		packetConn:       packetConn,
+		infoLANs:         infoLANs,
+		serviceInfoCache: make(map[string]*serviceInfoTime),
+		done:             make(chan struct{}),
+		cmdChan:          make(chan interface{}),
 	}
 
 	go r.run()
@@ -314,10 +321,26 @@ func (r *registryLAN) registerServiceForLAN(publisher, service, port string) {
 // support wildcard
 func (r *registryLAN) queryServiceInLAN(publisher, service string) []*ServiceInfo {
 	name := publisher + "_" + service
+	r.Lock()
+	if len(r.serviceInfoCache) > 1000 {
+		r.serviceInfoCache = make(map[string]*serviceInfoTime)
+	}
+	sit := r.serviceInfoCache[name]
+	r.Unlock()
+
+	if sit != nil && time.Since(sit.timeStamp) < 15*time.Second {
+		return sit.si
+	}
+
 	cmd := &cmdLANQuery{name, make(chan []*ServiceInfo, 1)}
 	r.cmdChan <- cmd
+	si := <-cmd.chanServiceInfo
 
-	return <-cmd.chanServiceInfo
+	r.Lock()
+	r.serviceInfoCache[name] = &serviceInfoTime{time.Now(), si}
+	r.Unlock()
+
+	return si
 }
 
 func (r *registryLAN) run() {
@@ -366,6 +389,9 @@ func (r *registryLAN) run() {
 			for pID, pInfo := range prvds.table {
 				svcInfo := &ServiceInfo{Publisher: ss[0], Service: ss[1], ProviderID: pID, Addr: pInfo.addr}
 				serviceInfos = append(serviceInfos, svcInfo)
+				if time.Since(pInfo.timeStamp) > 15*time.Minute {
+					delete(prvds.table, pID)
+				}
 			}
 		}
 
@@ -380,12 +406,9 @@ func (r *registryLAN) run() {
 				walkProviders(prvds, cmd.name)
 			}
 		}
-
 		cmd.chanServiceInfo <- serviceInfos
 	}
 
-	wildcardQuery := ""
-	wildcardQueryTime := time.Now()
 	chanDelay := make(chan *cmdLANQuery, 8)
 	for {
 		select {
@@ -396,46 +419,11 @@ func (r *registryLAN) run() {
 			case *cmdLANRegister:
 				localServiceTable[cmd.name] = cmd.port
 			case *cmdLANQuery:
-				wait := false
-				t := time.Now()
-				if strings.Contains(cmd.name, "*") {
-					if wildcardQuery != cmd.name || t.After(wildcardQueryTime.Add(15*time.Second)) {
-						for name, prvds := range serviceCache {
-							if wildcardMatch(cmd.name, name) {
-								for pID, pInfo := range prvds.table {
-									if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
-										delete(prvds.table, pID)
-									}
-								}
-								prvds.timeStamp = t
-							}
-						}
-						if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
-							lg.Warnf("lan registry send broadcast error: %v", err)
-							break
-						}
-						wildcardQuery = cmd.name
-						wildcardQueryTime = t
-						wait = true
-					}
-				} else {
-					prvds, has := serviceCache[cmd.name]
-					if !has || t.After(prvds.timeStamp.Add(15*time.Second)) {
-						if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
-							lg.Warnf("lan registry send broadcast error: %v", err)
-							break
-						}
-						wait = true
-						if has {
-							prvds.timeStamp = t
-						}
-					}
+				if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
+					lg.Warnf("lan registry send broadcast error: %v", err)
+					break
 				}
-				if wait {
-					time.AfterFunc(100*time.Millisecond, func() { chanDelay <- cmd })
-				} else {
-					getServiceInfos(cmd)
-				}
+				time.AfterFunc(100*time.Millisecond, func() { chanDelay <- cmd })
 			default:
 				panic(fmt.Sprintf("unknown cmd: %v", cmd))
 			}
@@ -460,13 +448,12 @@ func (r *registryLAN) run() {
 				}
 			case *foundInLAN:
 				rhost, _, _ := net.SplitHostPort(raddr.String())
-				t := time.Now()
 				prvds, has := serviceCache[msg.name]
 				if !has {
-					prvds = &providers{t, make(map[string]*providerInfo)}
+					prvds = &providers{table: make(map[string]*providerInfo)}
 					serviceCache[msg.name] = prvds
 				}
-				prvds.table[msg.providerID] = &providerInfo{t, rhost + ":" + msg.port, false}
+				prvds.table[msg.providerID] = &providerInfo{time.Now(), rhost + ":" + msg.port, false}
 			default:
 				panic(fmt.Sprintf("unknown msg: %v", msg))
 			}
