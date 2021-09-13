@@ -7,4 +7,4 @@ require (
 	github.com/niubaoshu/gotiny v0.0.3
 )
 
-replace github.com/niubaoshu/gotiny => github.com/godevsig/gotiny v0.0.4-0.20210826165942-af63eabe2674
+replace github.com/niubaoshu/gotiny => github.com/godevsig/gotiny v0.0.4-0.20210913173728-083dd4b72177
