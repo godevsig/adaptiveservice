@@ -38,7 +38,7 @@ func NewClient(options ...Option) *Client {
 // If no provider id presents, discover searches scopes by distance and returns
 // only one connection towards the found service which may have been randomly selected
 // if more than one services were found.
-// If any of publisher or service or provider ids is "*", discover will return
+// If any of publisher or service or provider ids contains "*", discover will return
 // all currently available connections of the wanted service(s). Make sure to close
 // ALL the connections it returns.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {

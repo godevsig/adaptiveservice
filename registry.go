@@ -235,8 +235,10 @@ type registryLAN struct {
 func (s *Server) newLANRegistry() (*registryLAN, error) {
 	packetConn, err := net.ListenPacket("udp4", ":"+s.broadcastPort)
 	if err != nil {
+		s.lg.Errorf("listen lan broadcast error: %v", err)
 		return nil, err
 	}
+	s.addCloser(ioCloser(packetConn.Close))
 
 	var infoLANs []*infoLAN
 	addrs, _ := net.InterfaceAddrs()

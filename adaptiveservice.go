@@ -199,6 +199,13 @@ type closer interface {
 	close()
 }
 
+// allows io.Closer to be closer
+type ioCloser func() error
+
+func (c ioCloser) close() {
+	c()
+}
+
 func addSigCloser(c closer) {
 	sigCleaner.Lock()
 	sigCleaner.closers = append(sigCleaner.closers, c)
