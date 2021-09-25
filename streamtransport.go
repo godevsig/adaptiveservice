@@ -497,6 +497,7 @@ func (conn *streamConnection) receiver() {
 			defer func() {
 				if err := recover(); err != nil {
 					lg.Errorf("unknown message: %v", err)
+					tm.msg = err
 				}
 			}()
 			dec.Decode(bufMsg, &tm)
