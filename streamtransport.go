@@ -2,10 +2,12 @@ package adaptiveservice
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -324,7 +326,11 @@ func (st *streamTransport) receiver() {
 				return
 			}
 			if _, err := io.ReadFull(netconn, bufSize); err != nil {
-				lg.Warnf("stream sever receiver: from %s read size error: %v", netconn.RemoteAddr().String(), err)
+				if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "use of closed network connection") {
+					lg.Debugf("stream sever receiver: connection closed: %v", err)
+				} else {
+					lg.Warnf("stream sever receiver: from %s read size error: %v", netconn.RemoteAddr().String(), err)
+				}
 				return
 			}
 
@@ -341,11 +347,14 @@ func (st *streamTransport) receiver() {
 			}
 			lg.Debugf("stream server receiver: size: %d, bufMsg: %v <%s>", size, bufMsg, bufMsg)
 
+			var decErr error
 			var tm streamTransportMsg
 			func() {
 				defer func() {
-					if err := recover(); err != nil {
-						lg.Errorf("unknown message: %v", err)
+					if e := recover(); e != nil {
+						decErr = fmt.Errorf("unknown message: %v", e)
+						lg.Errorf("%v", decErr)
+						tm.msg = decErr
 					}
 				}()
 				dec.Decode(bufMsg, &tm)
@@ -371,6 +380,13 @@ func (st *streamTransport) receiver() {
 					lg.Debugf("%s %s on new stream", st.svc.publisherName, st.svc.serviceName)
 					st.svc.fnOnNewStream(ss)
 				}
+			}
+
+			if decErr != nil {
+				if err := ss.Send(decErr); err != nil {
+					lg.Errorf("send decode error failed: %v", err)
+				}
+				continue
 			}
 
 			if st.svc.canHandle(tm.msg) {
@@ -474,7 +490,11 @@ func (conn *streamConnection) receiver() {
 	bufMsg := make([]byte, 512)
 	for {
 		if _, err := io.ReadFull(netconn, bufSize); err != nil {
-			lg.Warnf("stream client receiver: read size error: %v", err)
+			if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "use of closed network connection") {
+				lg.Debugf("stream client receiver: connection closed: %v", err)
+			} else {
+				lg.Warnf("stream client receiver: read size error: %v", err)
+			}
 			return
 		}
 
@@ -495,8 +515,9 @@ func (conn *streamConnection) receiver() {
 		//escapes(&tm)
 		func() {
 			defer func() {
-				if err := recover(); err != nil {
-					lg.Errorf("unknown message: %v", err)
+				if e := recover(); e != nil {
+					err := fmt.Errorf("unknown message: %v", e)
+					lg.Errorf("%v", err)
 					tm.msg = err
 				}
 			}()
