@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -42,6 +43,7 @@ func (svc *service) newUDSTransport() (*streamTransport, error) {
 	if err != nil {
 		return nil, err
 	}
+	os.Chmod(addr, 0777) // allow other local users to dial
 
 	st := makeStreamTransport(svc, lnr)
 	go st.receiver()
@@ -185,7 +187,7 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 	return ss.send(&tm)
 }
 
-func (ss *streamServerStream) Recv(msgPtr interface{}) error {
+func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 	if ss.connClose == nil {
 		return io.EOF
 	}
@@ -205,10 +207,15 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) error {
 		if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
 			mrv = mrv.Elem()
 		}
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("message type mismatch: %v", e)
+			}
+		}()
 		rv.Set(mrv)
 	}
 
-	return nil
+	return
 }
 
 func (ss *streamServerStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error {
@@ -597,7 +604,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	return nil
 }
 
-func (cs *streamClientStream) Recv(msgPtr interface{}) error {
+func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 	if cs.selfChan == nil {
 		return io.EOF
 	}
@@ -628,6 +635,11 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) error {
 	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
 		mrv = mrv.Elem()
 	}
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf("message type mismatch: %v", e)
+		}
+	}()
 	rv.Set(mrv)
 
 	if tm.dstChan != 0 {
@@ -637,7 +649,7 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) error {
 		cs.dstChan = tm.dstChan
 	}
 
-	return nil
+	return
 }
 
 func (cs *streamClientStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error {

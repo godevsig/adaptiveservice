@@ -1,7 +1,6 @@
 package adaptiveservice
 
 import (
-	"io"
 	"net"
 )
 
@@ -29,7 +28,6 @@ type Connection interface {
 // Stream is an independent channel multiplexed from the underlying connection.
 // Used for client side.
 type Stream interface {
-	io.ReadWriter
 	// Send sends a message to the stream peer.
 	Send(msg interface{}) error
 
@@ -45,6 +43,13 @@ type Stream interface {
 
 	// SendRecv combines send and receive on the same stream.
 	SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error
+
+	// Read is a Recv() that only receives []byte, complies io.Reader.
+	// Use Read() when you are sure that the peer is using Write() to send data.
+	Read(p []byte) (n int, err error)
+	// Write is a Send() that only sends []byte, complies io.Writer.
+	// Use Write() when you are sure that the peer is using Read() to retrive data.
+	Write(p []byte) (n int, err error)
 
 	// RecvTimeout is Recv with timeout, not supported in raw mode.
 	// It returns ErrRecvTimeout if timout happens in addition to Recv.
