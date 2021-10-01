@@ -1,6 +1,7 @@
 package adaptiveservice
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,7 +23,7 @@ var (
 )
 
 func init() {
-	if err := os.MkdirAll(udsRegistryDir, 0755); err != nil {
+	if err := os.MkdirAll(udsRegistryDir, 0777); err != nil {
 		panic(err)
 	}
 }
@@ -134,7 +135,7 @@ func (svc *service) regServiceLAN(port string) error {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 	if conn == nil {
-		panic("LANRegistry not found")
+		return errors.New("LANRegistry not found")
 	}
 	defer conn.Close()
 	return conn.SendRecv(&registerServiceForLAN{svc.publisherName, svc.serviceName, port}, nil)
@@ -145,7 +146,7 @@ func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 	if conn == nil {
-		panic("lan registry not found")
+		return
 	}
 	defer conn.Close()
 	conn.SendRecv(&queryServiceInLAN{publisherName, serviceName}, &serviceInfos)
@@ -427,7 +428,7 @@ func (r *registryLAN) run() {
 				}
 				time.AfterFunc(100*time.Millisecond, func() { chanDelay <- cmd })
 			default:
-				panic(fmt.Sprintf("unknown cmd: %v", cmd))
+				lg.Warnf("LAN receiver: unknown cmd: %v", cmd)
 			}
 		case cmd := <-chanDelay:
 			getServiceInfos(cmd)
@@ -457,7 +458,7 @@ func (r *registryLAN) run() {
 				}
 				prvds.table[msg.providerID] = &providerInfo{time.Now(), rhost + ":" + msg.port, false}
 			default:
-				panic(fmt.Sprintf("unknown msg: %v", msg))
+				lg.Warnf("LAN receiver: unknown msg: %v", msg)
 			}
 		}
 	}

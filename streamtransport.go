@@ -170,14 +170,6 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	return nil
 }
 
-func (ss *streamServerStream) sendNoPrivate(msg interface{}) error {
-	if ss.connClose == nil {
-		return io.EOF
-	}
-	tm := streamTransportMsg{dstChan: ss.dstChan, msg: msg}
-	return ss.send(&tm)
-}
-
 func (ss *streamServerStream) Send(msg interface{}) error {
 	if ss.connClose == nil {
 		return io.EOF
@@ -414,7 +406,7 @@ func (st *streamTransport) receiver() {
 				}()
 				lg.Debugf("sent to private channel of msg handler")
 			} else {
-				if err := ss.Send(ErrBadMessage); err != nil {
+				if err := ss.Send(fmt.Errorf("%w: %T", ErrBadMessage, tm.msg)); err != nil {
 					lg.Errorf("send ErrBadMessage failed: %v", err)
 				}
 			}
@@ -567,7 +559,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	if _, ok := msg.([]byte); !ok {
 		if _, ok := msg.(KnownMessage); !ok {
 			if cs.dstChan == 0 {
-				return ErrBadMessage
+				return fmt.Errorf("%w: %T", ErrBadMessage, msg)
 			}
 		}
 	}

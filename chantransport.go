@@ -51,14 +51,6 @@ type chanServerStream struct {
 	rbuff       []byte
 }
 
-func (ss *chanServerStream) sendNoPrivate(msg interface{}) error {
-	if ss.connClose == nil {
-		return io.EOF
-	}
-	ss.srcChan <- &chanTransportMsg{msg: msg}
-	return nil
-}
-
 func (ss *chanServerStream) Send(msg interface{}) error {
 	if ss.connClose == nil {
 		return io.EOF
@@ -201,7 +193,7 @@ func (ct *chanTransport) receiver() {
 							}
 							mq.putMetaMsg(mm)
 						} else {
-							ss.Send(ErrBadMessage)
+							ss.Send(fmt.Errorf("%w: %T", ErrBadMessage, tm.msg))
 						}
 					}
 				}
@@ -280,7 +272,7 @@ func (cs *chanClientStream) Send(msg interface{}) error {
 		return nil
 	}
 
-	return ErrBadMessage
+	return fmt.Errorf("%w: %T", ErrBadMessage, msg)
 }
 
 func (cs *chanClientStream) Recv(msgPtr interface{}) error {

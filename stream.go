@@ -51,12 +51,11 @@ type Stream interface {
 	// Use Write() when you are sure that the peer is using Read() to retrive data.
 	Write(p []byte) (n int, err error)
 
-	// RecvTimeout is Recv with timeout, not supported in raw mode.
-	// It returns ErrRecvTimeout if timout happens in addition to Recv.
-	//RecvTimeout(timeout time.Duration) (msg interface{}, err error)
+	// RecvTimeout is Recv with timeout, returns ErrRecvTimeout if timout happens.
+	//RecvTimeout(msgPtr interface{}, timeout time.Duration) error
 
-	// GetNetConn gets the raw network connection.
-	//GetNetConn() net.Conn
+	// GetNetconn gets the transport connection.
+	//GetNetconn() Netconn
 }
 
 // ContextStream is a stream with an associated context.
@@ -66,5 +65,4 @@ type Stream interface {
 type ContextStream interface {
 	Context
 	Stream
-	sendNoPrivate(msg interface{}) error
 }
