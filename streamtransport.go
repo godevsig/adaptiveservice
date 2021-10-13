@@ -141,6 +141,10 @@ type streamServerStream struct {
 	rbuff       []byte
 }
 
+func (ss *streamServerStream) GetNetconn() Netconn {
+	return ss.netconn
+}
+
 func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	buf := net.Buffers{}
 	mainCopy := false
@@ -552,6 +556,10 @@ func (conn *streamConnection) Close() {
 	conn.netconn.Close()
 }
 
+func (cs *streamClientStream) GetNetconn() Netconn {
+	return cs.conn.netconn
+}
+
 func (cs *streamClientStream) Send(msg interface{}) error {
 	if cs.selfChan == nil {
 		return io.EOF
@@ -609,6 +617,8 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 	if err, ok := tm.msg.(error); ok { // message handler returned error
 		if err == io.EOF {
 			cs.selfChan = nil
+		} else {
+			err = fmt.Errorf("server error: %w", err)
 		}
 		return err
 	}

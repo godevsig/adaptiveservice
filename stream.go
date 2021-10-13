@@ -55,7 +55,7 @@ type Stream interface {
 	//RecvTimeout(msgPtr interface{}, timeout time.Duration) error
 
 	// GetNetconn gets the transport connection.
-	//GetNetconn() Netconn
+	GetNetconn() Netconn
 }
 
 // ContextStream is a stream with an associated context.

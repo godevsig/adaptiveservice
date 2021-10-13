@@ -45,10 +45,15 @@ func (ct *chanTransport) close() {
 
 type chanServerStream struct {
 	Context
+	netconn     chanconn
 	connClose   chan struct{}
 	srcChan     chan *chanTransportMsg
 	privateChan chan *chanTransportMsg // dedicated to the client
 	rbuff       []byte
+}
+
+func (ss *chanServerStream) GetNetconn() Netconn {
+	return ss.netconn
 }
 
 func (ss *chanServerStream) Send(msg interface{}) error {
@@ -175,6 +180,7 @@ func (ct *chanTransport) receiver() {
 						ss := ssMap[tm.srcChan]
 						if ss == nil {
 							ss = &chanServerStream{
+								netconn:     cc,
 								connClose:   connClose,
 								Context:     &contextImpl{},
 								srcChan:     tm.srcChan,
@@ -252,6 +258,14 @@ func (conn *chanConnection) Close() {
 	close(conn.connClose)
 }
 
+func (cs *chanClientStream) GetNetconn() Netconn {
+	cc := chanconn{
+		localAddr:  chanAddr(uintptr(unsafe.Pointer(&cs.conn.connClose))),
+		remoteAddr: chanAddr(uintptr(unsafe.Pointer(&cs.conn.cct.ct.closed))),
+	}
+	return cc
+}
+
 func (cs *chanClientStream) Send(msg interface{}) error {
 	if cs.selfChan == nil {
 		return io.EOF
@@ -283,6 +297,8 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) error {
 	if err, ok := tm.msg.(error); ok { // message handler returned error
 		if err == io.EOF {
 			cs.selfChan = nil
+		} else {
+			err = fmt.Errorf("server error: %w", err)
 		}
 		return err
 	}
