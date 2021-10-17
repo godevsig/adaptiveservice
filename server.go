@@ -102,7 +102,7 @@ func (s *Server) init() error {
 	}
 
 	if s.scope&ScopeLAN == ScopeLAN {
-		s.lg.Infof("configing server in local network scope")
+		s.lg.Infof("configuring server in local network scope")
 		c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
 		conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
 		if conn != nil {
@@ -120,7 +120,7 @@ func (s *Server) init() error {
 	}
 
 	if s.scope&ScopeWAN == ScopeWAN {
-		s.lg.Infof("configing server in public network scope")
+		s.lg.Infof("configuring server in public network scope")
 		if addr, err := discoverRegistryAddr(s.lg); err != nil {
 			if len(s.registryAddr) == 0 {
 				return errors.New("root registry address not found or configured")
@@ -235,12 +235,15 @@ type service struct {
 	knownMsgTypes  map[reflect.Type]struct{}
 	s              *Server
 	scope          Scope
-	fnOnNewStream  func(Context)      // called on new stream accepted
-	fnOnConnect    func(Netconn) bool // called on new connection established
-	fnOnDisconnect func(Netconn)      // called on connection disconnected
+	fnOnNewStream  func(Context)             // called on new stream accepted
+	fnOnConnect    func(Netconn) (stop bool) // called on new connection established
+	fnOnDisconnect func(Netconn)             // called on connection disconnected
 }
 
 func (svc *service) canHandle(msg interface{}) bool {
+	if _, ok := msg.(KnownMessage); !ok {
+		return false
+	}
 	if svc.s.msgTypeCheck {
 		_, has := svc.knownMsgTypes[reflect.TypeOf(msg)]
 		return has

@@ -35,12 +35,12 @@ func (msg *reqRegistryInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverRegistryAddr(lg Logger) (addr string, err error) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
-	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "registryInfo")
-	if conn != nil {
-		defer conn.Close()
-		err = conn.SendRecv(&reqRegistryInfo{}, &addr)
+	if conn == nil {
+		return "", ErrServiceNotFound(BuiltinPublisher, "registryInfo")
 	}
+	defer conn.Close()
+	err = conn.SendRecv(&reqRegistryInfo{}, &addr)
 	return
 }
 
@@ -65,12 +65,12 @@ func (msg *ReqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverProviderID(lg Logger) (id string, err error) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
-	err = ErrServiceNotFound
 	conn := <-c.Discover(BuiltinPublisher, "providerInfo")
-	if conn != nil {
-		defer conn.Close()
-		err = conn.SendRecv(&ReqProviderInfo{}, &id)
+	if conn == nil {
+		return "", ErrServiceNotFound(BuiltinPublisher, "providerInfo")
 	}
+	defer conn.Close()
+	err = conn.SendRecv(&ReqProviderInfo{}, &id)
 	return
 }
 

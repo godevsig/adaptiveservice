@@ -84,21 +84,61 @@ const (
 )
 
 var (
-	// ErrServiceNotFound is an error where no wanted service found
-	ErrServiceNotFound = errors.New("service not found")
 	// ErrServiceNotReachable is an error where the service exists
 	// but somehow can not be reached, e.g. the service is behind NAT.
 	ErrServiceNotReachable = errors.New("service not reachable")
-	// ErrBadMessage is an error that the message can not be handled.
-	// It is either an unwanted known message or an unknown message
-	// with no route to message handler.
-	ErrBadMessage = errors.New("message not supported")
 	// ErrConnReset is an error where the connection was forced closed
 	// by peer.
 	ErrConnReset = errors.New("connection reset by peer")
 	// ErrServerClosed is an error where the server was closed by signal.
 	ErrServerClosed = errors.New("server closed by signal")
 )
+
+type errServiceNotFound struct {
+	publisher string
+	service   string
+}
+
+func (e errServiceNotFound) Error() string {
+	return "service not found: " + e.publisher + "_" + e.service
+}
+
+// ErrServiceNotFound returns an error that no wanted service was found
+func ErrServiceNotFound(publisher, service string) error {
+	return errServiceNotFound{publisher, service}
+}
+
+type streamReadWriter struct {
+	stream Stream
+	rbuff  []byte
+}
+
+func (srw streamReadWriter) Read(p []byte) (n int, err error) {
+	if len(srw.rbuff) == 0 {
+		if err := srw.stream.Recv(&srw.rbuff); err != nil {
+			return 0, err
+		}
+	}
+	n = copy(p, srw.rbuff)
+	srw.rbuff = srw.rbuff[n:]
+	return
+}
+
+func (srw streamReadWriter) Write(p []byte) (n int, err error) {
+	if srw.stream.Send(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// NewStreamReadWriter wraps the stream to be an io.ReadWriter in which
+// Read() is a Stream.Recv() that only receives []byte,
+// Write is a Stream.Send() that only sends []byte.
+// Use Read() Write() in pair on the client/server peer, don't mix use
+// them with Send() or Recv().
+func NewStreamReadWriter(stream Stream) io.ReadWriter {
+	return streamReadWriter{stream: stream}
+}
 
 // Logger is the logger interface.
 type Logger interface {

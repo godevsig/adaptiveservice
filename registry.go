@@ -412,6 +412,7 @@ func (r *registryLAN) run() {
 		cmd.chanServiceInfo <- serviceInfos
 	}
 
+	tLocalServiceUpdate := time.Now()
 	chanDelay := make(chan *cmdLANQuery, 8)
 	for {
 		select {
@@ -433,6 +434,15 @@ func (r *registryLAN) run() {
 		case cmd := <-chanDelay:
 			getServiceInfos(cmd)
 		case packetMsg := <-packetChan:
+			t := time.Now()
+			if t.After(tLocalServiceUpdate.Add(15 * time.Minute)) {
+				tLocalServiceUpdate = t
+				for name, port := range localServiceTable {
+					if err := pingService("127.0.0.1:" + port); err != nil {
+						delete(localServiceTable, name)
+					}
+				}
+			}
 			msg := packetMsg.msg
 			raddr := packetMsg.raddr
 			switch msg := msg.(type) {

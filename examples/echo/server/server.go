@@ -15,15 +15,22 @@ type statMgr struct {
 	counter     int64
 }
 
+const (
+	// Publisher is the service(s) publisher
+	Publisher = "example"
+	// ServiceEcho is the echo service
+	ServiceEcho = "echo.v1.0"
+)
+
 // Run runs the server.
 func Run(opts []as.Option) {
-	s := as.NewServer(opts...).SetPublisher("example.org")
+	s := as.NewServer(opts...).SetPublisher(Publisher)
 
 	mgr := &statMgr{
 		clients:     make(map[string]struct{}),
 		subscribers: make(map[chan string]struct{}),
 	}
-	if err := s.Publish("echo.v1.0",
+	if err := s.Publish(ServiceEcho,
 		echoKnownMsgs,
 		as.OnNewStreamFunc(mgr.onNewStream),
 		as.OnConnectFunc(mgr.onConnect),

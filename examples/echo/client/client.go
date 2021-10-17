@@ -13,9 +13,9 @@ import (
 // Run runs the client.
 func Run(cmd string, opts []as.Option) {
 	c := as.NewClient(opts...).SetDeepCopy()
-	conn := <-c.Discover("example.org", "echo.v1.0")
+	conn := <-c.Discover(echo.Publisher, echo.ServiceEcho)
 	if conn == nil {
-		fmt.Println(as.ErrServiceNotFound)
+		fmt.Println(as.ErrServiceNotFound(echo.Publisher, echo.ServiceEcho))
 		os.Exit(1)
 	}
 	defer conn.Close()
@@ -75,7 +75,7 @@ func Run(cmd string, opts []as.Option) {
 				Num: 100 * int32(i),
 			}
 			var rep echo.MessageReply
-			for i := 0; i < 90; i++ {
+			for i := 0; i < 9; i++ {
 				req.Num += 10
 				if err := stream.SendRecv(&req, &rep); err != nil {
 					fmt.Println(err)

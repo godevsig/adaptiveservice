@@ -26,16 +26,13 @@ type Connection interface {
 }
 
 // Stream is an independent channel multiplexed from the underlying connection.
-// Used for client side.
 type Stream interface {
-	// Send sends a message to the stream peer.
+	// Send sends a message to the stream peer. If msg is an error value, it will
+	// be received and returned by peer's Recv() as error.
 	Send(msg interface{}) error
 
 	// Recv receives a message from the stream peer and stores it into the value
 	// that msgPtr points to.
-	//
-	// If the peer's message handler returns error type, the error will be
-	// returned by Recv() as error.
 	//
 	// msgPtr can be nil, where user only cares about error, otherwise
 	// it panics if msgPtr is not a non-nil pointer.
@@ -43,13 +40,6 @@ type Stream interface {
 
 	// SendRecv combines send and receive on the same stream.
 	SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error
-
-	// Read is a Recv() that only receives []byte, complies io.Reader.
-	// Use Read() when you are sure that the peer is using Write() to send data.
-	Read(p []byte) (n int, err error)
-	// Write is a Send() that only sends []byte, complies io.Writer.
-	// Use Write() when you are sure that the peer is using Read() to retrive data.
-	Write(p []byte) (n int, err error)
 
 	// RecvTimeout is Recv with timeout, returns ErrRecvTimeout if timout happens.
 	//RecvTimeout(msgPtr interface{}, timeout time.Duration) error
@@ -61,7 +51,6 @@ type Stream interface {
 // ContextStream is a stream with an associated context.
 // Messages from the same stream have the same context, their handlers
 // may be executed concurrently.
-// Used for server side.
 type ContextStream interface {
 	Context
 	Stream

@@ -101,8 +101,8 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 		case mm := <-mq.getEgressChan():
 			st.working()
 			reply := mm.msg.Handle(mm.stream)
-			//mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
-			mq.lg.Debugf("message: %T handled, reply: %T", mm.msg, reply)
+			mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
+			//mq.lg.Debugf("message: %T handled, reply: %T", mm.msg, reply)
 			if reply != nil {
 				mm.stream.Send(reply)
 			}

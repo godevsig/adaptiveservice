@@ -80,7 +80,7 @@ type sessionInfo struct {
 	mgr         *statMgr
 }
 
-func (mgr *statMgr) onConnect(netconn as.Netconn) bool {
+func (mgr *statMgr) onConnect(netconn as.Netconn) (stop bool) {
 	raddr := netconn.RemoteAddr().String()
 	fmt.Println("on connect from:", raddr)
 	mgr.Lock()

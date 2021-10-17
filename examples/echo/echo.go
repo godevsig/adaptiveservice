@@ -28,7 +28,7 @@ func main() {
 	} else if clientMode {
 		client.Run(*clientCmd, opts)
 	} else {
-		opts = append(opts, as.WithScope(as.ScopeProcess))
+		//opts = append(opts, as.WithScope(as.ScopeProcess))
 		go client.Run(*clientCmd, opts)
 		done := make(chan struct{})
 		go func() {

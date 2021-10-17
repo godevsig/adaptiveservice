@@ -5,15 +5,16 @@ package adaptiveservice
 type KnownMessage interface {
 	// Handle handles the message.
 	// If reply is nil, no message will be sent back.
-	// If reply is error type, the error will be sent back to the stream peer
-	// as error, otherwise reply will be sent back as return value. In particular,
-	// if reply is io.EOF, the stream will be closed.
+	// If reply is not nil, the value will be sent back to the stream peer.
+	// If reply is error type, the peer's Recv() call will return it as error.
+	// Otherwise the reply will be received by the peer's Recv() as normal message.
+	// In particular, if reply is io.EOF, the stream will be closed.
 	//
 	// The message may be marshaled or compressed.
 	// Remember in golang assignment to interface is also value copy,
 	// so return reply as &someStruct whenever possible in your handler implementation.
 	//
-	// Users can directly use stream to send/receive messages to/from the stream
+	// Users can directly use ContextStream to send/receive messages to/from the stream
 	// peer(the client) via a private dedicated channel.
 	//
 	// Use of reply is more like RPC fashion, where clients "call" the Handle() method
@@ -22,10 +23,10 @@ type KnownMessage interface {
 	// In the case where only final status is needed, return builtin OK on success or
 	// return error type if any error happened, e.g. return errors.New("some error").
 	//
-	// Use of stream is more like client and server entered in an interactive session,
-	// in which several messages are exchanged between client and server.
+	// Use of ContextStream is more like client and server entered in an interactive
+	// session, in which several messages are exchanged between client and server.
 	//
-	// It is highly NOT recommend to mix the use of reply and stream.
+	// Cares should be taken if you mix the use of reply and ContextStream.
 	Handle(stream ContextStream) (reply interface{})
 }
 

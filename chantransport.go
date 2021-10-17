@@ -11,7 +11,7 @@ import (
 )
 
 type chanTransportMsg struct {
-	srcChan chan *chanTransportMsg
+	srcChan chan interface{}
 	msg     interface{}
 }
 
@@ -47,9 +47,8 @@ type chanServerStream struct {
 	Context
 	netconn     chanconn
 	connClose   chan struct{}
-	srcChan     chan *chanTransportMsg
-	privateChan chan *chanTransportMsg // dedicated to the client
-	rbuff       []byte
+	srcChan     chan interface{}
+	privateChan chan interface{} // dedicated to the client
 }
 
 func (ss *chanServerStream) GetNetconn() Netconn {
@@ -60,16 +59,16 @@ func (ss *chanServerStream) Send(msg interface{}) error {
 	if ss.connClose == nil {
 		return io.EOF
 	}
-	ss.srcChan <- &chanTransportMsg{srcChan: ss.privateChan, msg: msg}
+	ss.srcChan <- msg
 	return nil
 }
 
-func (ss *chanServerStream) Recv(msgPtr interface{}) error {
+func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 	if ss.connClose == nil {
 		return io.EOF
 	}
 	rptr := reflect.ValueOf(msgPtr)
-	if rptr.Kind() != reflect.Ptr || rptr.IsNil() {
+	if msgPtr != nil && (rptr.Kind() != reflect.Ptr || rptr.IsNil()) {
 		panic("not a pointer or nil pointer")
 	}
 
@@ -78,8 +77,20 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) error {
 	case <-ss.connClose:
 		ss.connClose = nil
 		return io.EOF
-	case tm := <-ss.privateChan:
-		rv.Set(reflect.ValueOf(tm.msg))
+	case msg := <-ss.privateChan:
+		if err, ok := msg.(error); ok {
+			err = fmt.Errorf("client error: %w", err)
+			return err
+		}
+		if msgPtr == nil { // msgPtr is nil
+			return nil // user just looks at error, no error here
+		}
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("message type mismatch: %v", e)
+			}
+		}()
+		rv.Set(reflect.ValueOf(msg))
 	}
 
 	return nil
@@ -93,24 +104,6 @@ func (ss *chanServerStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) 
 		return err
 	}
 	return nil
-}
-
-func (ss *chanServerStream) Write(p []byte) (n int, err error) {
-	if err := ss.Send(p); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-func (ss *chanServerStream) Read(p []byte) (n int, err error) {
-	if len(ss.rbuff) == 0 {
-		if err := ss.Recv(&ss.rbuff); err != nil {
-			return 0, err
-		}
-	}
-	n = copy(p, ss.rbuff)
-	ss.rbuff = ss.rbuff[n:]
-	return
 }
 
 type chanAddr uint64
@@ -171,7 +164,7 @@ func (ct *chanTransport) receiver() {
 					}
 					lg.Debugf("%s %s chan connection disconnected: %s", ct.svc.publisherName, ct.svc.serviceName, cc.RemoteAddr().String())
 				}()
-				ssMap := make(map[chan *chanTransportMsg]*chanServerStream)
+				ssMap := make(map[chan interface{}]*chanServerStream)
 				for {
 					select {
 					case <-connClose:
@@ -184,7 +177,7 @@ func (ct *chanTransport) receiver() {
 								connClose:   connClose,
 								Context:     &contextImpl{},
 								srcChan:     tm.srcChan,
-								privateChan: make(chan *chanTransportMsg, cap(tm.srcChan)),
+								privateChan: make(chan interface{}, cap(tm.srcChan)),
 							}
 							ssMap[tm.srcChan] = ss
 							if ct.svc.fnOnNewStream != nil {
@@ -199,7 +192,7 @@ func (ct *chanTransport) receiver() {
 							}
 							mq.putMetaMsg(mm)
 						} else {
-							ss.Send(fmt.Errorf("%w: %T", ErrBadMessage, tm.msg))
+							ss.privateChan <- tm.msg
 						}
 					}
 				}
@@ -211,10 +204,8 @@ func (ct *chanTransport) receiver() {
 // below for client side
 
 type chanClientStream struct {
-	conn        *chanConnection
-	selfChan    chan *chanTransportMsg
-	privateChan chan *chanTransportMsg // opened by server message handler
-	rbuff       []byte
+	conn    *chanConnection
+	msgChan chan interface{}
 }
 
 type clientChanTransport struct {
@@ -248,8 +239,8 @@ func (cct *clientChanTransport) newConnection() *chanConnection {
 // NewStream creates a new client stream.
 func (conn *chanConnection) NewStream() Stream {
 	cs := &chanClientStream{
-		conn:     conn,
-		selfChan: make(chan *chanTransportMsg, cap(conn.serverChan)),
+		conn:    conn,
+		msgChan: make(chan interface{}, cap(conn.serverChan)),
 	}
 	return cs
 }
@@ -267,62 +258,49 @@ func (cs *chanClientStream) GetNetconn() Netconn {
 }
 
 func (cs *chanClientStream) Send(msg interface{}) error {
-	if cs.selfChan == nil {
+	if cs.msgChan == nil {
 		return io.EOF
 	}
-	if _, ok := msg.(KnownMessage); ok {
-		if cs.conn.cct.owner.deepCopy {
-			msg = deepcopy.MustAnything(msg)
-		}
-		cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.selfChan, msg: msg}
-		return nil
+	if cs.conn.cct.owner.deepCopy {
+		msg = deepcopy.MustAnything(msg)
 	}
-
-	if cs.privateChan != nil {
-		if cs.conn.cct.owner.deepCopy {
-			msg = deepcopy.MustAnything(msg)
-		}
-		cs.privateChan <- &chanTransportMsg{msg: msg}
-		return nil
-	}
-
-	return fmt.Errorf("%w: %T", ErrBadMessage, msg)
+	cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.msgChan, msg: msg}
+	return nil
 }
 
-func (cs *chanClientStream) Recv(msgPtr interface{}) error {
-	if cs.selfChan == nil {
+func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
+	if cs.msgChan == nil {
 		return io.EOF
 	}
-	tm := <-cs.selfChan
-	if err, ok := tm.msg.(error); ok { // message handler returned error
+	rptr := reflect.ValueOf(msgPtr)
+	if msgPtr != nil && (rptr.Kind() != reflect.Ptr || rptr.IsNil()) {
+		panic("not a pointer or nil pointer")
+	}
+
+	msg := <-cs.msgChan
+	if err, ok := msg.(error); ok { // message handler returned error
 		if err == io.EOF {
-			cs.selfChan = nil
+			cs.msgChan = nil
 		} else {
 			err = fmt.Errorf("server error: %w", err)
 		}
 		return err
 	}
-	rptr := reflect.ValueOf(msgPtr)
-	kind := rptr.Kind()
-	if kind == reflect.Invalid { // msgPtr is nil
+	if msgPtr == nil { // msgPtr is nil
 		return nil // user just looks at error, no error here
 	}
-	if kind != reflect.Ptr || rptr.IsNil() {
-		panic("not a pointer or nil pointer")
-	}
+
 	rv := rptr.Elem()
-	mrv := reflect.ValueOf(tm.msg)
+	mrv := reflect.ValueOf(msg)
 	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
 		mrv = mrv.Elem()
 	}
-	rv.Set(mrv)
-
-	if tm.srcChan != nil {
-		if cs.privateChan != nil && cs.privateChan != tm.srcChan {
-			panic("private chan changed")
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf("message type mismatch: %v", e)
 		}
-		cs.privateChan = tm.srcChan
-	}
+	}()
+	rv.Set(mrv)
 
 	return nil
 }
@@ -335,22 +313,4 @@ func (cs *chanClientStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) 
 		return err
 	}
 	return nil
-}
-
-func (cs *chanClientStream) Write(p []byte) (n int, err error) {
-	if err := cs.Send(p); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-func (cs *chanClientStream) Read(p []byte) (n int, err error) {
-	if len(cs.rbuff) == 0 {
-		if err := cs.Recv(&cs.rbuff); err != nil {
-			return 0, err
-		}
-	}
-	n = copy(p, cs.rbuff)
-	cs.rbuff = cs.rbuff[n:]
-	return
 }

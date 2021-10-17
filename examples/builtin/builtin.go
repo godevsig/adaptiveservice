@@ -27,8 +27,7 @@ func getSelfID(opts []as.Option) (selfID string, err error) {
 	c := as.NewClient(opts...).SetDiscoverTimeout(0)
 	conn := <-c.Discover(as.BuiltinPublisher, "providerInfo")
 	if conn == nil {
-		err = as.ErrServiceNotFound
-		return
+		return "", as.ErrServiceNotFound(as.BuiltinPublisher, "providerInfo")
 	}
 	defer conn.Close()
 
@@ -107,7 +106,7 @@ func main() {
 			c := as.NewClient(opts...)
 			conn := <-c.Discover(as.BuiltinPublisher, "serviceLister")
 			if conn == nil {
-				fmt.Println(as.ErrServiceNotFound)
+				fmt.Println(as.ErrServiceNotFound(as.BuiltinPublisher, "serviceLister"))
 				return 1
 			}
 			defer conn.Close()

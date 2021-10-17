@@ -13,9 +13,9 @@ func OnNewStreamFunc(fn func(Context)) ServiceOption {
 
 // OnConnectFunc sets a function which is called when new
 // incoming connection is established.
-// The following message dispaching on this connection will stop
+// Further message dispaching on this connection will stop
 // if fn returns true, leaving the connection NOT closed.
-func OnConnectFunc(fn func(Netconn) bool) ServiceOption {
+func OnConnectFunc(fn func(Netconn) (stop bool)) ServiceOption {
 	return func(svc *service) {
 		svc.fnOnConnect = fn
 	}
