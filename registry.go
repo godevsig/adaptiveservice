@@ -133,7 +133,7 @@ func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
 
 func (svc *service) regServiceLAN(port string) error {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
-	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
+	conn := <-c.Discover(BuiltinPublisher, SrvLANRegistry)
 	if conn == nil {
 		return errors.New("LANRegistry not found")
 	}
@@ -144,7 +144,7 @@ func (svc *service) regServiceLAN(port string) error {
 // support wildcard
 func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos []*ServiceInfo) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
-	conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
+	conn := <-c.Discover(BuiltinPublisher, SrvLANRegistry)
 	if conn == nil {
 		return
 	}

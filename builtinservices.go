@@ -8,6 +8,16 @@ import (
 const (
 	// BuiltinPublisher name
 	BuiltinPublisher = "builtin"
+	// SrvRegistryInfo : service registryInfo
+	SrvRegistryInfo = "registryInfo"
+	// SrvProviderInfo : service providerInfo
+	SrvProviderInfo = "providerInfo"
+	// SrvLANRegistry : service LANRegistry
+	SrvLANRegistry = "LANRegistry"
+	// SrvReverseProxy : service reverseProxy
+	SrvReverseProxy = "reverseProxy"
+	// SrvServiceLister : service serviceLister
+	SrvServiceLister = "serviceLister"
 )
 
 var sharedInfo struct {
@@ -23,7 +33,7 @@ func (s *Server) publishRegistryInfoService() error {
 	}
 	sharedInfo.registryAddr = s.registryAddr
 	knownMsgs := []KnownMessage{(*reqRegistryInfo)(nil)}
-	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, "registryInfo", knownMsgs)
+	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvRegistryInfo, knownMsgs)
 }
 
 // reply with string
@@ -35,9 +45,9 @@ func (msg *reqRegistryInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverRegistryAddr(lg Logger) (addr string, err error) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
-	conn := <-c.Discover(BuiltinPublisher, "registryInfo")
+	conn := <-c.Discover(BuiltinPublisher, SrvRegistryInfo)
 	if conn == nil {
-		return "", ErrServiceNotFound(BuiltinPublisher, "registryInfo")
+		return "", ErrServiceNotFound(BuiltinPublisher, SrvRegistryInfo)
 	}
 	defer conn.Close()
 	err = conn.SendRecv(&reqRegistryInfo{}, &addr)
@@ -52,7 +62,7 @@ func (s *Server) publishProviderInfoService() error {
 	}
 	sharedInfo.providerID = s.providerID
 	knownMsgs := []KnownMessage{(*ReqProviderInfo)(nil)}
-	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, "providerInfo", knownMsgs)
+	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvProviderInfo, knownMsgs)
 }
 
 // ReqProviderInfo gets self provider ID, reply with string.
@@ -65,9 +75,9 @@ func (msg *ReqProviderInfo) Handle(stream ContextStream) (reply interface{}) {
 
 func discoverProviderID(lg Logger) (id string, err error) {
 	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
-	conn := <-c.Discover(BuiltinPublisher, "providerInfo")
+	conn := <-c.Discover(BuiltinPublisher, SrvProviderInfo)
 	if conn == nil {
-		return "", ErrServiceNotFound(BuiltinPublisher, "providerInfo")
+		return "", ErrServiceNotFound(BuiltinPublisher, SrvProviderInfo)
 	}
 	defer conn.Close()
 	err = conn.SendRecv(&ReqProviderInfo{}, &id)
@@ -84,7 +94,7 @@ func (s *Server) publishLANRegistryService() error {
 	s.addCloser(registry)
 
 	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*registerServiceForLAN)(nil)}
-	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, "LANRegistry",
+	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvLANRegistry,
 		knownMsgs,
 		OnNewStreamFunc(func(ctx Context) {
 			ctx.SetContext(registry)
@@ -118,7 +128,7 @@ func (msg *registerServiceForLAN) Handle(stream ContextStream) (reply interface{
 // publishReverseProxyService declares the reverse proxy service.
 func (s *Server) publishReverseProxyService(scope Scope) error {
 	knownMsgs := []KnownMessage{(*proxyRegServiceInWAN)(nil)}
-	return s.publish(scope, BuiltinPublisher, "reverseProxy",
+	return s.publish(scope, BuiltinPublisher, SrvReverseProxy,
 		knownMsgs,
 		OnNewStreamFunc(func(ctx Context) {
 			ctx.SetContext(s)
@@ -230,7 +240,7 @@ func (msg *ListService) Handle(stream ContextStream) (reply interface{}) {
 // publishServiceListerService declares the lister service.
 func (s *Server) publishServiceListerService(scope Scope) error {
 	knownMsgs := []KnownMessage{(*ListService)(nil)}
-	return s.publish(scope, BuiltinPublisher, "serviceLister",
+	return s.publish(scope, BuiltinPublisher, SrvServiceLister,
 		knownMsgs,
 		OnNewStreamFunc(func(ctx Context) {
 			ctx.SetContext(s)

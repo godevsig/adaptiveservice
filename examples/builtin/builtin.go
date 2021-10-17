@@ -25,9 +25,9 @@ func trimName(name string, size int) string {
 func getSelfID(opts []as.Option) (selfID string, err error) {
 	opts = append(opts, as.WithScope(as.ScopeProcess|as.ScopeOS))
 	c := as.NewClient(opts...).SetDiscoverTimeout(0)
-	conn := <-c.Discover(as.BuiltinPublisher, "providerInfo")
+	conn := <-c.Discover(as.BuiltinPublisher, as.SrvProviderInfo)
 	if conn == nil {
-		return "", as.ErrServiceNotFound(as.BuiltinPublisher, "providerInfo")
+		return "", as.ErrServiceNotFound(as.BuiltinPublisher, as.SrvProviderInfo)
 	}
 	defer conn.Close()
 
@@ -104,9 +104,9 @@ func main() {
 			}
 
 			c := as.NewClient(opts...)
-			conn := <-c.Discover(as.BuiltinPublisher, "serviceLister")
+			conn := <-c.Discover(as.BuiltinPublisher, as.SrvServiceLister)
 			if conn == nil {
-				fmt.Println(as.ErrServiceNotFound(as.BuiltinPublisher, "serviceLister"))
+				fmt.Println(as.ErrServiceNotFound(as.BuiltinPublisher, as.SrvServiceLister))
 				return 1
 			}
 			defer conn.Close()

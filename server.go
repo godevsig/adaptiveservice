@@ -104,7 +104,7 @@ func (s *Server) init() error {
 	if s.scope&ScopeLAN == ScopeLAN {
 		s.lg.Infof("configuring server in local network scope")
 		c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
-		conn := <-c.Discover(BuiltinPublisher, "LANRegistry")
+		conn := <-c.Discover(BuiltinPublisher, SrvLANRegistry)
 		if conn != nil {
 			conn.Close()
 			s.lg.Infof("LAN registry running")

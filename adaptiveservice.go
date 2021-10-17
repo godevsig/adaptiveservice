@@ -108,36 +108,40 @@ func ErrServiceNotFound(publisher, service string) error {
 	return errServiceNotFound{publisher, service}
 }
 
-type streamReadWriter struct {
+type streamIO struct {
 	stream Stream
 	rbuff  []byte
 }
 
-func (srw streamReadWriter) Read(p []byte) (n int, err error) {
-	if len(srw.rbuff) == 0 {
-		if err := srw.stream.Recv(&srw.rbuff); err != nil {
+func (sio *streamIO) Read(p []byte) (n int, err error) {
+	if len(sio.rbuff) == 0 {
+		if err := sio.stream.Recv(&sio.rbuff); err != nil {
 			return 0, err
 		}
 	}
-	n = copy(p, srw.rbuff)
-	srw.rbuff = srw.rbuff[n:]
+	n = copy(p, sio.rbuff)
+	sio.rbuff = sio.rbuff[n:]
 	return
 }
 
-func (srw streamReadWriter) Write(p []byte) (n int, err error) {
-	if srw.stream.Send(p); err != nil {
+func (sio *streamIO) Write(p []byte) (n int, err error) {
+	if err := sio.stream.Send(p); err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
-// NewStreamReadWriter wraps the stream to be an io.ReadWriter in which
+func (sio *streamIO) Close() error {
+	return sio.stream.Send(io.EOF)
+}
+
+// NewStreamIO wraps the stream to be an io.ReadWriteCloser in which
 // Read() is a Stream.Recv() that only receives []byte,
 // Write is a Stream.Send() that only sends []byte.
 // Use Read() Write() in pair on the client/server peer, don't mix use
 // them with Send() or Recv().
-func NewStreamReadWriter(stream Stream) io.ReadWriter {
-	return streamReadWriter{stream: stream}
+func NewStreamIO(stream Stream) io.ReadWriteCloser {
+	return &streamIO{stream: stream}
 }
 
 // Logger is the logger interface.

@@ -83,7 +83,7 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 				WithRegistryAddr(svc.s.registryAddr),
 				WithProviderID(svc.s.providerID),
 			).SetDiscoverTimeout(0)
-			connChan := c.Discover(BuiltinPublisher, "reverseProxy", "*")
+			connChan := c.Discover(BuiltinPublisher, SrvReverseProxy, "*")
 			for conn := range connChan {
 				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID}, nil)
 				if err == nil {
@@ -131,7 +131,7 @@ type streamServerStream struct {
 	mtx         *sync.Mutex
 	lg          Logger
 	netconn     net.Conn
-	connClose   chan struct{}
+	connClose   *chan struct{}
 	privateChan chan interface{} // dedicated to the client
 	qsize       int
 	chanID      uint64 // client stream channel ID, taken from transport msg
@@ -173,7 +173,7 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 }
 
 func (ss *streamServerStream) Send(msg interface{}) error {
-	if ss.connClose == nil {
+	if *ss.connClose == nil {
 		return io.EOF
 	}
 	tm := streamTransportMsg{chanID: ss.chanID, msg: msg}
@@ -181,7 +181,7 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 }
 
 func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
-	if ss.connClose == nil {
+	if *ss.connClose == nil {
 		return io.EOF
 	}
 	rptr := reflect.ValueOf(msgPtr)
@@ -191,8 +191,7 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 
 	rv := rptr.Elem()
 	select {
-	case <-ss.connClose:
-		ss.connClose = nil
+	case <-*ss.connClose:
 		return io.EOF
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
@@ -301,6 +300,7 @@ func (st *streamTransport) receiver() {
 			}
 			lg.Debugf("%s %s stream connection disconnected: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
 			close(connClose)
+			connClose = nil
 			netconn.Close()
 		}()
 		var mtx sync.Mutex
@@ -356,7 +356,7 @@ func (st *streamTransport) receiver() {
 					mtx:         &mtx,
 					lg:          lg,
 					netconn:     netconn,
-					connClose:   connClose,
+					connClose:   &connClose,
 					privateChan: make(chan interface{}, qsize),
 					qsize:       qsize,
 					chanID:      tm.chanID,
@@ -453,7 +453,10 @@ func (c *Client) newTCPConnection(addr string) (*streamConnection, error) {
 }
 
 func (conn *streamConnection) receiver() {
-	defer close(conn.closed)
+	defer func() {
+		close(conn.closed)
+		conn.closed = nil
+	}()
 	lg := conn.owner.lg
 	netconn := conn.netconn
 	dec := gotiny.NewDecoderWithPtr((*streamTransportMsg)(nil))
@@ -528,7 +531,7 @@ func (cs *streamClientStream) GetNetconn() Netconn {
 }
 
 func (cs *streamClientStream) Send(msg interface{}) error {
-	if cs.msgChan == nil {
+	if cs.msgChan == nil || cs.conn.closed == nil {
 		return io.EOF
 	}
 
@@ -565,7 +568,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 }
 
 func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
-	if cs.msgChan == nil {
+	if cs.msgChan == nil || cs.conn.closed == nil {
 		return io.EOF
 	}
 

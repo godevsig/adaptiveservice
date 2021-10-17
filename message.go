@@ -8,7 +8,6 @@ type KnownMessage interface {
 	// If reply is not nil, the value will be sent back to the stream peer.
 	// If reply is error type, the peer's Recv() call will return it as error.
 	// Otherwise the reply will be received by the peer's Recv() as normal message.
-	// In particular, if reply is io.EOF, the stream will be closed.
 	//
 	// The message may be marshaled or compressed.
 	// Remember in golang assignment to interface is also value copy,

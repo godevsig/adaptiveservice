@@ -46,7 +46,7 @@ func (ct *chanTransport) close() {
 type chanServerStream struct {
 	Context
 	netconn     chanconn
-	connClose   chan struct{}
+	connClose   *chan struct{}
 	srcChan     chan interface{}
 	privateChan chan interface{} // dedicated to the client
 }
@@ -56,7 +56,7 @@ func (ss *chanServerStream) GetNetconn() Netconn {
 }
 
 func (ss *chanServerStream) Send(msg interface{}) error {
-	if ss.connClose == nil {
+	if *ss.connClose == nil {
 		return io.EOF
 	}
 	ss.srcChan <- msg
@@ -64,7 +64,7 @@ func (ss *chanServerStream) Send(msg interface{}) error {
 }
 
 func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
-	if ss.connClose == nil {
+	if *ss.connClose == nil {
 		return io.EOF
 	}
 	rptr := reflect.ValueOf(msgPtr)
@@ -74,8 +74,7 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 
 	rv := rptr.Elem()
 	select {
-	case <-ss.connClose:
-		ss.connClose = nil
+	case <-*ss.connClose:
 		return io.EOF
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
@@ -168,13 +167,14 @@ func (ct *chanTransport) receiver() {
 				for {
 					select {
 					case <-connClose:
+						connClose = nil
 						return
 					case tm := <-recvChan:
 						ss := ssMap[tm.srcChan]
 						if ss == nil {
 							ss = &chanServerStream{
 								netconn:     cc,
-								connClose:   connClose,
+								connClose:   &connClose,
 								Context:     &contextImpl{},
 								srcChan:     tm.srcChan,
 								privateChan: make(chan interface{}, cap(tm.srcChan)),
