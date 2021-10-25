@@ -326,9 +326,12 @@ func (s *Server) Serve() error {
 			return err
 		}
 	}
-	defer s.close()
+	defer s.doClose()
 	s.lg.Infof("server in serve")
 	for e := range s.errRecovers {
+		if (e == noError{}) {
+			break
+		}
 		if e.Recover() {
 			s.lg.Infof("error recovered: %s : %v", e.String(), e.Error())
 		} else {
@@ -345,19 +348,25 @@ func (s *Server) addCloser(closer closer) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	s.close()
+	s.lg.Infof("server closing by user")
+	s.doClose()
+	s.errRecovers <- noError{}
 }
 
 func (s *Server) close() {
+	s.doClose()
+	s.errRecovers <- unrecoverableError{ErrServerClosed}
+}
+
+func (s *Server) doClose() {
 	s.Lock()
 	defer s.Unlock()
 	if s.closers == nil {
 		return
 	}
-	s.lg.Infof("server closing")
 	for _, closer := range s.closers {
 		closer.close()
 	}
-	s.errRecovers <- unrecoverableError{ErrServerClosed}
+	s.lg.Infof("server closed")
 	s.closers = nil
 }

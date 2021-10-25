@@ -196,6 +196,20 @@ type errorRecover interface {
 	Recover() (recovered bool) // return true if the error has been recovered.
 }
 
+type noError struct{}
+
+func (e noError) Error() error {
+	return nil
+}
+
+func (e noError) String() string {
+	return "no error"
+}
+
+func (e noError) Recover() bool {
+	return false
+}
+
 type unrecoverableError struct {
 	err error
 }
