@@ -34,7 +34,7 @@
 // server defines Handle() method for every message type it can handle,
 // then when the known message arrived on one of the transports it is
 // listening, the message is delivered to one of the workers in which
-// the message is then being handled.
+// the message's Handle() is called.
 // Clients do not define Handle() method, they just send and receive message
 // in a natural synchronized fashion.
 //
@@ -60,7 +60,7 @@ import (
 )
 
 // Scope is publishing and discovering scope
-type Scope int
+type Scope uint16
 
 const (
 	// ScopeProcess is a scope where publishing and discovering services

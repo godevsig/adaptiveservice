@@ -26,7 +26,9 @@ func WithLogger(lg Logger) Option {
 	}
 }
 
-// WithScope sets the publishing and discovering scope.
+// WithScope sets the publishing or discovering scope, which is
+// an ORed value of ScopeProcess, ScopeOS, ScopeLAN or ScopeWAN.
+// Default is ScopeAll.
 func WithScope(scope Scope) Option {
 	return func(c *conf) {
 		c.scope = scope

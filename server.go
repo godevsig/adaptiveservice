@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net"
 	"os"
 	"reflect"
@@ -93,9 +92,6 @@ func (s *Server) init() error {
 			}
 			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
 		} else {
-			if len(s.providerID) != 0 && id != s.providerID {
-				return fmt.Errorf("conflict provider ID: %s => %s ?", id, s.providerID)
-			}
 			s.providerID = id
 			s.lg.Infof("discovered provider ID: %s", s.providerID)
 		}
@@ -110,12 +106,14 @@ func (s *Server) init() error {
 			s.lg.Infof("LAN registry running")
 		} else {
 			if len(s.broadcastPort) == 0 {
-				return errors.New("LAN registry not found or configured")
+				s.lg.Infof("LAN registry not found or configured")
+				s.scope &= ^ScopeLAN // not ScopeLAN
+			} else {
+				if err := s.publishLANRegistryService(); err != nil {
+					return err
+				}
+				s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.broadcastPort)
 			}
-			if err := s.publishLANRegistryService(); err != nil {
-				return err
-			}
-			s.lg.Infof("user specified broadcast port: %s, LAN registry service started", s.broadcastPort)
 		}
 	}
 
@@ -123,27 +121,26 @@ func (s *Server) init() error {
 		s.lg.Infof("configuring server in public network scope")
 		if addr, err := discoverRegistryAddr(s.lg); err != nil {
 			if len(s.registryAddr) == 0 {
-				return errors.New("root registry address not found or configured")
+				s.lg.Infof("root registry address not found or configured")
+				s.scope &= ^ScopeWAN // not ScopeWAN
+			} else {
+				if err := s.publishRegistryInfoService(); err != nil {
+					return err
+				}
+				s.lg.Infof("user specified root registry address: %s, registry info service started", s.registryAddr)
 			}
-			if err := s.publishRegistryInfoService(); err != nil {
-				return err
-			}
-			s.lg.Infof("user specified root registry address: %s, registry info service started", s.registryAddr)
 		} else {
-			if len(s.registryAddr) != 0 && addr != s.registryAddr {
-				return fmt.Errorf("conflict root registry address: %s => %s ?", addr, s.registryAddr)
-			}
 			s.registryAddr = addr
 			s.lg.Infof("discovered root registry address: %s", addr)
 		}
 	}
 
 	if s.rootRegistry {
-		if s.scope&ScopeWAN != ScopeWAN {
-			panic("scope error")
-		}
 		if len(s.registryAddr) == 0 {
 			return errors.New("root registry address not configured")
+		}
+		if s.scope&ScopeWAN != ScopeWAN {
+			panic("scope error")
 		}
 
 		_, port, _ := net.SplitHostPort(s.registryAddr)

@@ -1,7 +1,6 @@
 package adaptiveservice
 
 import (
-	"fmt"
 	"math/rand"
 	"strings"
 	"time"
@@ -34,13 +33,19 @@ func NewClient(options ...Option) *Client {
 // Each connection represents a connection to one of the service providers
 // providing the wanted micro service.
 //
-// Use providerIDs to select target providers.
-// If no provider id presents, discover searches scopes by distance and returns
+// Only one service(identified by publisher name and service name) can exist in
+// ScopeProcess and ScopeOS, but in ScopeLAN and ScopeWAN there can be many systems
+// providing the same service, each systeam(called provider) has an unique provider ID.
+//
+// Use providerIDs to select target providers in ScopeLAN or ScopeWAN,
+// if no provider id presents, discover searches scopes by distance that is
+// in the order of ScopeProcess, ScopeOS, ScopeLAN, ScopeWAN, and returns
 // only one connection towards the found service which may have been randomly selected
 // if more than one services were found.
+//
 // If any of publisher or service or provider ids contains "*", discover will return
 // all currently available connections of the wanted service(s). Make sure to close
-// ALL the connections it returns.
+// ALL the connections it returns after use.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {
 	connections := make(chan Connection)
 
@@ -69,7 +74,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		if len(c.providerID) == 0 {
 			providerID, err := discoverProviderID(c.lg)
 			if err != nil {
-				panic(fmt.Sprintf("provider ID not found: %v", err))
+				providerID = "NA"
 			}
 			c.providerID = providerID
 		}
@@ -143,15 +148,17 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
 			c.lg.Debugf("finding %s_%s in ScopeWAN", publisher, service)
 			if len(c.registryAddr) == 0 {
-				if addr, err := discoverRegistryAddr(c.lg); err != nil {
-					panic("registry address not found or configured")
-				} else {
-					c.registryAddr = addr
-					c.lg.Infof("discovered registry address: %s", addr)
+				addr, err := discoverRegistryAddr(c.lg)
+				if err != nil {
+					addr = "NA"
 				}
+				c.registryAddr = addr
+				c.lg.Infof("discovered registry address: %s", addr)
 			}
-			addrs = c.lookupServiceWAN(publisher, service, providerIDs...)
-			connect()
+			if c.registryAddr != "NA" {
+				addrs = c.lookupServiceWAN(publisher, service, providerIDs...)
+				connect()
+			}
 		}
 		return found
 	}
