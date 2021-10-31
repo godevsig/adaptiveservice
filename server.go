@@ -20,6 +20,7 @@ type Server struct {
 	rootRegistry     bool
 	autoReverseProxy bool
 	serviceLister    bool
+	ipObserver       bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
 	qWeight          int
@@ -220,6 +221,13 @@ func (s *Server) init() error {
 			return err
 		}
 		s.lg.Infof("service lister started")
+	}
+
+	if s.ipObserver && s.scope&ScopeWAN == ScopeWAN {
+		if err := s.publishIPObserverService(); err != nil {
+			return err
+		}
+		s.lg.Infof("IP observer started")
 	}
 	s.lg.Debugf("server initialized")
 	return nil

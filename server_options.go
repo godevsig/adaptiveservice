@@ -53,3 +53,10 @@ func (s *Server) EnableServiceLister() *Server {
 	s.serviceLister = true
 	return s
 }
+
+// EnableIPObserver enables IP observer service which helps the
+// requesting client to find out its observed IP address.
+func (s *Server) EnableIPObserver() *Server {
+	s.ipObserver = true
+	return s
+}

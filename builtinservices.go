@@ -18,6 +18,8 @@ const (
 	SrvReverseProxy = "reverseProxy"
 	// SrvServiceLister : service serviceLister
 	SrvServiceLister = "serviceLister"
+	// SrvIPObserver : service IPObserver
+	SrvIPObserver = "IPObserver"
 )
 
 var sharedInfo struct {
@@ -247,6 +249,25 @@ func (s *Server) publishServiceListerService(scope Scope) error {
 		}))
 }
 
+// GetObservedIP returns the observed IP of the client.
+// The reply is string type.
+type GetObservedIP struct{}
+
+// Handle handles GetObservedIP message.
+func (msg GetObservedIP) Handle(stream ContextStream) (reply interface{}) {
+	rhost, _, err := net.SplitHostPort(stream.GetNetconn().RemoteAddr().String())
+	if err != nil {
+		return err
+	}
+	return rhost
+}
+
+// publishIPObserverService declares the IP observer service.
+func (s *Server) publishIPObserverService() error {
+	knownMsgs := []KnownMessage{GetObservedIP{}}
+	return s.publish(ScopeWAN, BuiltinPublisher, SrvIPObserver, knownMsgs)
+}
+
 func init() {
 	RegisterType((*reqRegistryInfo)(nil))
 	RegisterType((*ReqProviderInfo)(nil))
@@ -255,4 +276,5 @@ func init() {
 	RegisterType((*proxyRegServiceInWAN)(nil))
 	RegisterType((*ListService)(nil))
 	RegisterType([4][]*ServiceInfo{})
+	RegisterType(GetObservedIP{})
 }
