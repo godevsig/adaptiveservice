@@ -356,13 +356,10 @@ func (s *Server) addCloser(closer closer) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	s.lg.Infof("server closing by user")
-	s.doClose()
 	s.errRecovers <- noError{}
 }
 
 func (s *Server) close() {
-	s.doClose()
 	s.errRecovers <- unrecoverableError{ErrServerClosed}
 }
 
