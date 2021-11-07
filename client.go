@@ -153,7 +153,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 					addr = "NA"
 				}
 				c.registryAddr = addr
-				c.lg.Infof("discovered registry address: %s", addr)
+				c.lg.Debugf("discovered registry address: %s", addr)
 			}
 			if c.registryAddr != "NA" {
 				addrs = c.lookupServiceWAN(publisher, service, providerIDs...)

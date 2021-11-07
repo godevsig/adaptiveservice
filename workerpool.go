@@ -99,7 +99,7 @@ func (wp *workerPool) close() {
 	wp.wg.Wait()
 }
 
-// len returns the number of running workers in the workerPool.
+// len returns the number of idle workers in the workerPool.
 func (wp *workerPool) len() int {
 	cnt := atomic.LoadInt32(&wp.cnt)
 	return int(cnt)

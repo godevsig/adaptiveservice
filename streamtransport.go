@@ -51,6 +51,28 @@ func (svc *service) newUDSTransport() (*streamTransport, error) {
 	return st, nil
 }
 
+func connectReverseProxy(svc *service) Connection {
+	c := NewClient(WithScope(ScopeLAN|ScopeWAN),
+		WithLogger(svc.s.lg),
+		WithRegistryAddr(svc.s.registryAddr),
+		WithProviderID(svc.s.providerID),
+	).SetDiscoverTimeout(3)
+	connChan := c.Discover(BuiltinPublisher, SrvReverseProxy, "*")
+	defer func() {
+		for conn := range connChan {
+			conn.Close()
+		}
+	}()
+	for conn := range connChan {
+		err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID}, nil)
+		if err == nil {
+			return conn
+		}
+		conn.Close()
+	}
+	return nil
+}
+
 func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	if len(onPort) == 0 {
 		onPort = "0"
@@ -78,31 +100,14 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 	if svc.scope&ScopeWAN == ScopeWAN {
 		if err := svc.regServiceWAN(port); err != nil {
 			svc.s.lg.Infof("service %s %s can not register to WAN directly: %v", svc.publisherName, svc.serviceName, err)
-			c := NewClient(WithScope(ScopeLAN|ScopeWAN),
-				WithLogger(svc.s.lg),
-				WithRegistryAddr(svc.s.registryAddr),
-				WithProviderID(svc.s.providerID),
-			).SetDiscoverTimeout(0)
-			connChan := c.Discover(BuiltinPublisher, SrvReverseProxy, "*")
-			for conn := range connChan {
-				err := conn.SendRecv(&proxyRegServiceInWAN{svc.publisherName, svc.serviceName, svc.s.providerID}, nil)
-				if err == nil {
-					svc.s.lg.Infof("reverse proxy connected")
-					st.reverseProxyConn = conn
-					go st.reverseReceiver()
-					break
-				}
-				conn.Close()
-			}
-			for conn := range connChan {
-				conn.Close()
-			}
-
+			st.reverseProxyConn = connectReverseProxy(svc)
 			if st.reverseProxyConn == nil {
 				svc.s.lg.Warnf("service %s %s register to proxy failed", svc.publisherName, svc.serviceName)
 				st.close()
 				return nil, err
 			}
+			svc.s.lg.Infof("reverse proxy connected")
+			go st.reverseReceiver()
 		}
 		svc.s.lg.Infof("service %s %s registered to WAN", svc.publisherName, svc.serviceName)
 	}
@@ -248,6 +253,14 @@ func (st *streamTransport) reverseReceiver() {
 		}
 		st.chanNetConn <- netconn
 	}
+	lg.Infof("reverse proxy lost, reconnecting")
+	st.reverseProxyConn = connectReverseProxy(st.svc)
+	if st.reverseProxyConn == nil {
+		lg.Errorf("service %s %s lost connection to reverse proxy", st.svc.publisherName, st.svc.serviceName)
+		return
+	}
+	lg.Infof("reverse proxy reconnected")
+	go st.reverseReceiver()
 }
 
 func (st *streamTransport) receiver() {
