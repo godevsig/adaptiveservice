@@ -35,7 +35,7 @@ func NewServer(options ...Option) *Server {
 	s := &Server{
 		conf:         newConf(),
 		publisher:    "default.org",
-		errRecovers:  make(chan errorRecover),
+		errRecovers:  make(chan errorRecover, 1),
 		qWeight:      8,
 		qScale:       8,
 		msgTypeCheck: true,
@@ -356,10 +356,16 @@ func (s *Server) addCloser(closer closer) {
 
 // Close closes the server.
 func (s *Server) Close() {
+	if s.closers == nil {
+		return
+	}
 	s.errRecovers <- noError{}
 }
 
 func (s *Server) close() {
+	if s.closers == nil {
+		return
+	}
 	s.errRecovers <- unrecoverableError{ErrServerClosed}
 }
 
