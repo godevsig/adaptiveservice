@@ -255,7 +255,13 @@ type GetObservedIP struct{}
 
 // Handle handles GetObservedIP message.
 func (msg GetObservedIP) Handle(stream ContextStream) (reply interface{}) {
-	rhost, _, err := net.SplitHostPort(stream.GetNetconn().RemoteAddr().String())
+	netconn := stream.GetNetconn()
+	network := netconn.LocalAddr().Network()
+	if network == "chan" || network == "unix" {
+		return "127.0.0.1"
+	}
+
+	rhost, _, err := net.SplitHostPort(netconn.RemoteAddr().String())
 	if err != nil {
 		return err
 	}
@@ -265,7 +271,7 @@ func (msg GetObservedIP) Handle(stream ContextStream) (reply interface{}) {
 // publishIPObserverService declares the IP observer service.
 func (s *Server) publishIPObserverService() error {
 	knownMsgs := []KnownMessage{GetObservedIP{}}
-	return s.publish(ScopeWAN, BuiltinPublisher, SrvIPObserver, knownMsgs)
+	return s.publish(s.scope, BuiltinPublisher, SrvIPObserver, knownMsgs)
 }
 
 func init() {

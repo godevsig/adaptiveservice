@@ -75,6 +75,8 @@ const (
 	// ScopeWAN is a scope where publishing and discovering services
 	// only happen in same reachable public network.
 	ScopeWAN
+	// ScopeNetwork is a shortcut for ScopeLAN and ScopeWAN
+	ScopeNetwork = ScopeLAN | ScopeWAN
 	// ScopeAll includes all scopes.
 	ScopeAll = ScopeProcess | ScopeOS | ScopeLAN | ScopeWAN
 

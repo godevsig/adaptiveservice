@@ -223,7 +223,7 @@ func (s *Server) init() error {
 		s.lg.Infof("service lister started")
 	}
 
-	if s.ipObserver && s.scope&ScopeWAN == ScopeWAN {
+	if s.ipObserver {
 		if err := s.publishIPObserverService(); err != nil {
 			return err
 		}
@@ -315,16 +315,25 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	return nil
 }
 
-// Publish publishes service to all available scopes.
+// Publish publishes service to all available scope of Server s.
 // knownMessages are messages that the service can handle, e.g.
 // []KnownMessage{(*PublicStructA)(nil), (*PublicStructB)(nil), ...},
 // where (*PublicStructA) and (*PublicStructB) are the known messages that
-// have Handle(stream ContextStream) reply interface{} method.
+// have `Handle(stream ContextStream) reply interface{}` method.
 func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
 	if strings.ContainsAny(serviceName, "_/") {
 		panic("serviceName should not contain _ or /")
 	}
 	return s.publish(s.scope, s.publisher, serviceName, knownMessages, options...)
+}
+
+// PublishIn is like Publish, but with specified scope which should be
+// a subset of the scope of Server s.
+func (s *Server) PublishIn(scope Scope, serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
+	if strings.ContainsAny(serviceName, "_/") {
+		panic("serviceName should not contain _ or /")
+	}
+	return s.publish(scope, s.publisher, serviceName, knownMessages, options...)
 }
 
 // Serve starts serving.
