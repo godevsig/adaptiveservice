@@ -123,6 +123,13 @@ func (st *streamTransport) close() {
 		}
 		close(st.closed)
 		st.closed = nil
+		svc := st.svc
+		if svc.scope&ScopeLAN == ScopeLAN {
+			svc.delServiceLAN()
+		}
+		if svc.scope&ScopeWAN == ScopeWAN {
+			svc.delServiceWAN()
+		}
 	}
 }
 

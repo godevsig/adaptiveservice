@@ -41,6 +41,7 @@ func (svc *service) newChanTransport() (*chanTransport, error) {
 
 func (ct *chanTransport) close() {
 	close(ct.closed)
+	delServiceChan(ct.svc.publisherName, ct.svc.serviceName)
 }
 
 type chanServerStream struct {

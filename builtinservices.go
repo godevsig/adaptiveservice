@@ -127,6 +127,18 @@ func (msg *registerServiceForLAN) Handle(stream ContextStream) (reply interface{
 	return OK
 }
 
+// no reply
+type deleteServiceForLAN struct {
+	publisher string
+	service   string
+}
+
+func (msg *deleteServiceForLAN) Handle(stream ContextStream) (reply interface{}) {
+	registry := stream.GetContext().(*registryLAN)
+	registry.deleteServiceForLAN(msg.publisher, msg.service)
+	return nil
+}
+
 // publishReverseProxyService declares the reverse proxy service.
 func (s *Server) publishReverseProxyService(scope Scope) error {
 	knownMsgs := []KnownMessage{(*proxyRegServiceInWAN)(nil)}

@@ -38,6 +38,13 @@ func regServiceChan(publisherName, serviceName string, ct *chanTransport) {
 	chanRegistry.table[name] = ct
 }
 
+func delServiceChan(publisherName, serviceName string) {
+	name := publisherName + "_" + serviceName
+	chanRegistry.Lock()
+	delete(chanRegistry.table, name)
+	chanRegistry.Unlock()
+}
+
 func serviceNamesInProcess(publisherName, serviceName string) (names []string) {
 	name := publisherName + "_" + serviceName
 	if strings.Contains(name, "*") {
@@ -139,6 +146,16 @@ func (svc *service) regServiceLAN(port string) error {
 	}
 	defer conn.Close()
 	return conn.SendRecv(&registerServiceForLAN{svc.publisherName, svc.serviceName, port}, nil)
+}
+
+func (svc *service) delServiceLAN() error {
+	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(svc.s.lg)).SetDiscoverTimeout(0)
+	conn := <-c.Discover(BuiltinPublisher, SrvLANRegistry)
+	if conn == nil {
+		return errors.New("LANRegistry not found")
+	}
+	defer conn.Close()
+	return conn.Send(&deleteServiceForLAN{svc.publisherName, svc.serviceName})
 }
 
 // support wildcard
@@ -311,6 +328,10 @@ type cmdLANRegister struct {
 	port string
 }
 
+type cmdLANDelete struct {
+	name string // "publisher_service"
+}
+
 type cmdLANQuery struct {
 	name            string // "publisher_service"
 	chanServiceInfo chan []*ServiceInfo
@@ -319,6 +340,11 @@ type cmdLANQuery struct {
 func (r *registryLAN) registerServiceForLAN(publisher, service, port string) {
 	name := publisher + "_" + service
 	r.cmdChan <- &cmdLANRegister{name, port}
+}
+
+func (r *registryLAN) deleteServiceForLAN(publisher, service string) {
+	name := publisher + "_" + service
+	r.cmdChan <- &cmdLANDelete{name}
 }
 
 // support wildcard
@@ -422,6 +448,8 @@ func (r *registryLAN) run() {
 			switch cmd := cmd.(type) {
 			case *cmdLANRegister:
 				localServiceTable[cmd.name] = cmd.port
+			case *cmdLANDelete:
+				delete(localServiceTable, cmd.name)
 			case *cmdLANQuery:
 				if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
 					lg.Warnf("lan registry send broadcast error: %v", err)
@@ -491,6 +519,16 @@ func (svc *service) regServiceWAN(port string) error {
 		proxied = true
 	}
 	return conn.SendRecv(&regServiceInWAN{svc.publisherName, svc.serviceName, svc.providerID, port, proxied}, nil)
+}
+
+func (svc *service) delServiceWAN() error {
+	c := NewClient(WithScope(ScopeWAN), WithLogger(svc.s.lg))
+	conn, err := c.newTCPConnection(svc.s.registryAddr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Send(&delServiceInWAN{svc.publisherName, svc.serviceName, svc.providerID})
 }
 
 // support wildcard
@@ -601,6 +639,30 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	pmap.Unlock()
 
 	return OK
+}
+
+// no reply
+type delServiceInWAN struct {
+	publisher  string
+	service    string
+	providerID string
+}
+
+func (msg *delServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
+	rr := stream.GetContext().(*rootRegistry)
+	name := msg.publisher + "_" + msg.service
+	rr.RLock()
+	pmap, has := rr.serviceMap[name]
+	rr.RUnlock()
+	if !has {
+		return nil
+	}
+
+	pmap.Lock()
+	delete(pmap.providers, msg.providerID)
+	pmap.Unlock()
+
+	return nil
 }
 
 // reply []*ServiceInfo

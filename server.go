@@ -83,21 +83,6 @@ func (s *Server) init() error {
 	s.mq = newMsgQ(s.qWeight, s.qScale, s.lg)
 	s.addCloser(s.mq)
 
-	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
-		if id, err := discoverProviderID(s.lg); err != nil {
-			if len(s.providerID) == 0 {
-				s.providerID = genID()
-			}
-			if err := s.publishProviderInfoService(); err != nil {
-				return err
-			}
-			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
-		} else {
-			s.providerID = id
-			s.lg.Infof("discovered provider ID: %s", s.providerID)
-		}
-	}
-
 	if s.scope&ScopeLAN == ScopeLAN {
 		s.lg.Infof("configuring server in local network scope")
 		c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
@@ -133,6 +118,21 @@ func (s *Server) init() error {
 		} else {
 			s.registryAddr = addr
 			s.lg.Infof("discovered root registry address: %s", addr)
+		}
+	}
+
+	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
+		if id, err := discoverProviderID(s.lg); err != nil {
+			if len(s.providerID) == 0 {
+				s.providerID = genID()
+			}
+			if err := s.publishProviderInfoService(); err != nil {
+				return err
+			}
+			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
+		} else {
+			s.providerID = id
+			s.lg.Infof("discovered provider ID: %s", s.providerID)
 		}
 	}
 
@@ -258,6 +258,14 @@ func (svc *service) canHandle(msg interface{}) bool {
 
 func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
 	s.lg.Debugf("publishing %s %s in scope %b", publisherName, serviceName, scope)
+	if !s.initialized {
+		if err := s.init(); err != nil {
+			return err
+		}
+	}
+	scope = s.scope & scope
+	s.lg.Debugf("adjusted %s %s in scope %b", publisherName, serviceName, scope)
+
 	newService := func() *service {
 		svc := &service{
 			publisherName: publisherName,
@@ -273,16 +281,6 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 			svc.knownMsgTypes[tp] = struct{}{}
 		}
 		return svc
-	}
-
-	if s.scope&scope != scope {
-		panic("scope error")
-	}
-
-	if !s.initialized {
-		if err := s.init(); err != nil {
-			return err
-		}
 	}
 
 	svc := newService()
