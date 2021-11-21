@@ -153,7 +153,7 @@ func (s *Server) init() error {
 		s.lg.Infof("root registry started at %s", port)
 	}
 
-	if s.autoReverseProxy {
+	if s.scope&ScopeWAN == ScopeWAN && s.autoReverseProxy {
 		canProxy := func() bool {
 			if s.rootRegistry {
 				return true
