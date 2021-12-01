@@ -145,7 +145,7 @@ func (svc *service) regServiceLAN(port string) error {
 		return errors.New("LANRegistry not found")
 	}
 	defer conn.Close()
-	return conn.SendRecv(&registerServiceForLAN{svc.publisherName, svc.serviceName, port}, nil)
+	return conn.SendRecv(&regServiceInLAN{svc.publisherName, svc.serviceName, port}, nil)
 }
 
 func (svc *service) delServiceLAN() error {
@@ -155,7 +155,7 @@ func (svc *service) delServiceLAN() error {
 		return errors.New("LANRegistry not found")
 	}
 	defer conn.Close()
-	return conn.Send(&deleteServiceForLAN{svc.publisherName, svc.serviceName})
+	return conn.Send(&delServiceInLAN{svc.publisherName, svc.serviceName})
 }
 
 // support wildcard
@@ -337,12 +337,12 @@ type cmdLANQuery struct {
 	chanServiceInfo chan []*ServiceInfo
 }
 
-func (r *registryLAN) registerServiceForLAN(publisher, service, port string) {
+func (r *registryLAN) registerServiceInLAN(publisher, service, port string) {
 	name := publisher + "_" + service
 	r.cmdChan <- &cmdLANRegister{name, port}
 }
 
-func (r *registryLAN) deleteServiceForLAN(publisher, service string) {
+func (r *registryLAN) deleteServiceInLAN(publisher, service string) {
 	name := publisher + "_" + service
 	r.cmdChan <- &cmdLANDelete{name}
 }
@@ -380,6 +380,20 @@ func (r *registryLAN) run() {
 	localServiceTable := make(map[string]string)
 	// "publisher_service": {time.Time, {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}}
 	serviceCache := make(map[string]*providers)
+
+	f, err := os.Open("local_services.record")
+	if err == nil {
+		for {
+			var name, port string
+			_, err := fmt.Fscanln(f, &name, &port)
+			if err != nil {
+				break
+			}
+			localServiceTable[name] = port
+		}
+		f.Close()
+		os.Remove("local_services.record")
+	}
 
 	readConn := func() {
 		buf := make([]byte, 512)
@@ -443,6 +457,13 @@ func (r *registryLAN) run() {
 	for {
 		select {
 		case <-r.done:
+			f, err := os.Create("local_services.record")
+			if err == nil {
+				for name, port := range localServiceTable {
+					fmt.Fprintln(f, name, port)
+				}
+				f.Close()
+			}
 			return
 		case cmd := <-r.cmdChan:
 			switch cmd := cmd.(type) {
@@ -733,6 +754,7 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 
 func init() {
 	RegisterType((*regServiceInWAN)(nil))
+	RegisterType((*delServiceInWAN)(nil))
 	RegisterType((*queryServiceInWAN)(nil))
 	RegisterType((*testReverseProxy)(nil))
 }

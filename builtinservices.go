@@ -95,7 +95,7 @@ func (s *Server) publishLANRegistryService() error {
 	}
 	s.addCloser(registry)
 
-	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*registerServiceForLAN)(nil)}
+	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*regServiceInLAN)(nil)}
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvLANRegistry,
 		knownMsgs,
 		OnNewStreamFunc(func(ctx Context) {
@@ -115,27 +115,27 @@ func (msg *queryServiceInLAN) Handle(stream ContextStream) (reply interface{}) {
 }
 
 // reply OK on success or else reply err
-type registerServiceForLAN struct {
+type regServiceInLAN struct {
 	publisher string
 	service   string
 	port      string
 }
 
-func (msg *registerServiceForLAN) Handle(stream ContextStream) (reply interface{}) {
+func (msg *regServiceInLAN) Handle(stream ContextStream) (reply interface{}) {
 	registry := stream.GetContext().(*registryLAN)
-	registry.registerServiceForLAN(msg.publisher, msg.service, msg.port)
+	registry.registerServiceInLAN(msg.publisher, msg.service, msg.port)
 	return OK
 }
 
 // no reply
-type deleteServiceForLAN struct {
+type delServiceInLAN struct {
 	publisher string
 	service   string
 }
 
-func (msg *deleteServiceForLAN) Handle(stream ContextStream) (reply interface{}) {
+func (msg *delServiceInLAN) Handle(stream ContextStream) (reply interface{}) {
 	registry := stream.GetContext().(*registryLAN)
-	registry.deleteServiceForLAN(msg.publisher, msg.service)
+	registry.deleteServiceInLAN(msg.publisher, msg.service)
 	return nil
 }
 
@@ -290,7 +290,8 @@ func init() {
 	RegisterType((*reqRegistryInfo)(nil))
 	RegisterType((*ReqProviderInfo)(nil))
 	RegisterType((*queryServiceInLAN)(nil))
-	RegisterType((*registerServiceForLAN)(nil))
+	RegisterType((*regServiceInLAN)(nil))
+	RegisterType((*delServiceInLAN)(nil))
 	RegisterType((*proxyRegServiceInWAN)(nil))
 	RegisterType((*ListService)(nil))
 	RegisterType([4][]*ServiceInfo{})
