@@ -28,6 +28,7 @@ type Server struct {
 	msgTypeCheck     bool
 	closers          []closer
 	initialized      bool
+	closed           chan struct{}
 }
 
 // NewServer creates a server which publishes services.
@@ -39,6 +40,7 @@ func NewServer(options ...Option) *Server {
 		qWeight:      8,
 		qScale:       8,
 		msgTypeCheck: true,
+		closed:       make(chan struct{}),
 	}
 
 	for _, o := range options {
@@ -367,6 +369,7 @@ func (s *Server) Close() {
 		return
 	}
 	s.errRecovers <- noError{}
+	<-s.closed
 }
 
 func (s *Server) close() {
@@ -387,4 +390,5 @@ func (s *Server) doClose() {
 	}
 	s.lg.Infof("server closed")
 	s.closers = nil
+	close(s.closed)
 }
