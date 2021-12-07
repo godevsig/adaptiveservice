@@ -95,7 +95,7 @@ func (s *Server) publishLANRegistryService() error {
 	}
 	s.addCloser(registry)
 
-	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*regServiceInLAN)(nil)}
+	knownMsgs := []KnownMessage{(*queryServiceInLAN)(nil), (*regServiceInLAN)(nil), (*delServiceInLAN)(nil)}
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvLANRegistry,
 		knownMsgs,
 		OnNewStreamFunc(func(ctx Context) {

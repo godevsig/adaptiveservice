@@ -785,6 +785,7 @@ func (s *Server) startRootRegistry(port string) error {
 		s:             s,
 	}
 	svc.knownMsgTypes[reflect.TypeOf((*regServiceInWAN)(nil))] = struct{}{}
+	svc.knownMsgTypes[reflect.TypeOf((*delServiceInWAN)(nil))] = struct{}{}
 	svc.knownMsgTypes[reflect.TypeOf((*queryServiceInWAN)(nil))] = struct{}{}
 	svc.knownMsgTypes[reflect.TypeOf((*testReverseProxy)(nil))] = struct{}{}
 
