@@ -363,12 +363,18 @@ func (s *Server) addCloser(closer closer) {
 	s.closers = append(s.closers, closer)
 }
 
-// Close closes the server.
+// Close triggers the close procedure of the server.
 func (s *Server) Close() {
 	if s.closers == nil {
 		return
 	}
 	s.errRecovers <- noError{}
+}
+
+// CloseWait triggers the close procedure and waits
+// until the server is fully closed.
+func (s *Server) CloseWait() {
+	s.Close()
 	<-s.closed
 }
 
