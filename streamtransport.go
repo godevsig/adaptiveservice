@@ -115,20 +115,29 @@ func (svc *service) newTCPTransport(onPort string) (*streamTransport, error) {
 }
 
 func (st *streamTransport) close() {
-	if st.closed != nil {
-		st.svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
-		st.lnr.Close()
-		if st.reverseProxyConn != nil {
-			st.reverseProxyConn.Close()
+	closed := st.closed
+	if st.closed == nil {
+		return
+	}
+	st.closed = nil
+	close(closed)
+	svc := st.svc
+	svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
+	st.lnr.Close()
+	if st.reverseProxyConn != nil {
+		st.reverseProxyConn.Close()
+	}
+	if st.lnr.Addr().Network() == "unix" {
+		return
+	}
+	if svc.scope&ScopeLAN == ScopeLAN {
+		if err := svc.delServiceLAN(); err != nil {
+			svc.s.lg.Warnf("del service in lan failed: %v", err)
 		}
-		close(st.closed)
-		st.closed = nil
-		svc := st.svc
-		if svc.scope&ScopeLAN == ScopeLAN {
-			svc.delServiceLAN()
-		}
-		if svc.scope&ScopeWAN == ScopeWAN {
-			svc.delServiceWAN()
+	}
+	if svc.scope&ScopeWAN == ScopeWAN {
+		if err := svc.delServiceWAN(); err != nil {
+			svc.s.lg.Warnf("del service in wan failed: %v", err)
 		}
 	}
 }
@@ -408,9 +417,10 @@ func (st *streamTransport) receiver() {
 		}
 	}
 
+	closed := st.closed
 	for {
 		select {
-		case <-st.closed:
+		case <-closed:
 			return
 		case netconn := <-st.chanNetConn:
 			go handleConn(netconn)

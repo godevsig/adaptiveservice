@@ -452,6 +452,14 @@ func (r *registryLAN) run() {
 		cmd.chanServiceInfo <- serviceInfos
 	}
 
+	delService := func(name string) {
+		delete(localServiceTable, name)
+		prvds, has := serviceCache[name]
+		if has {
+			delete(prvds.table, r.s.providerID)
+		}
+	}
+
 	tLocalServiceUpdate := time.Now()
 	chanDelay := make(chan *cmdLANQuery, 8)
 	for {
@@ -470,7 +478,7 @@ func (r *registryLAN) run() {
 			case *cmdLANRegister:
 				localServiceTable[cmd.name] = cmd.port
 			case *cmdLANDelete:
-				delete(localServiceTable, cmd.name)
+				delService(cmd.name)
 			case *cmdLANQuery:
 				if err := r.broadcast(&queryInLAN{cmd.name}); err != nil {
 					lg.Warnf("lan registry send broadcast error: %v", err)
@@ -488,7 +496,7 @@ func (r *registryLAN) run() {
 				tLocalServiceUpdate = t
 				for name, port := range localServiceTable {
 					if err := pingService("127.0.0.1:" + port); err != nil {
-						delete(localServiceTable, name)
+						delService(name)
 					}
 				}
 			}
