@@ -176,11 +176,21 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	_, port, _ := net.SplitHostPort(reversetran.lnr.Addr().String()) // from [::]:43807
 
 	var proxytran *streamTransport
+	go func() {
+		if err := stream.Recv(nil); err != nil {
+			s.lg.Debugf("service cmdconn read lost, closing its proxy")
+			reversetran.close()
+			if proxytran != nil {
+				proxytran.close()
+			}
+		}
+	}()
+
 	onClientConnection := func(netconn Netconn) bool {
 		clientConn := netconn.(net.Conn)
 		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
-			s.lg.Debugf("service lost, closing its proxy")
+			s.lg.Debugf("service cmdconn write lost, closing its proxy")
 			reversetran.close()
 			proxytran.close()
 			clientConn.Close()
