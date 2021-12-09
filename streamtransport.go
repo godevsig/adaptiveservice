@@ -202,6 +202,7 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 }
 
 func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
+	connClose := *ss.connClose
 	if *ss.connClose == nil {
 		return io.EOF
 	}
@@ -210,9 +211,8 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
-	rv := rptr.Elem()
 	select {
-	case <-*ss.connClose:
+	case <-connClose:
 		return io.EOF
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
@@ -222,6 +222,8 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 		if msgPtr == nil { // msgPtr is nil
 			return nil // user just looks at error, no error here
 		}
+
+		rv := rptr.Elem()
 		mrv := reflect.ValueOf(msg)
 		if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
 			mrv = mrv.Elem()
@@ -598,6 +600,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 }
 
 func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
+	connClosed := cs.conn.closed
 	if cs.msgChan == nil || cs.conn.closed == nil {
 		return io.EOF
 	}
@@ -609,7 +612,7 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 
 	var msg interface{}
 	select {
-	case <-cs.conn.closed:
+	case <-connClosed:
 		return ErrConnReset
 	case msg = <-cs.msgChan:
 	}

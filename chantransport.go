@@ -65,6 +65,7 @@ func (ss *chanServerStream) Send(msg interface{}) error {
 }
 
 func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
+	connClose := *ss.connClose
 	if *ss.connClose == nil {
 		return io.EOF
 	}
@@ -73,9 +74,8 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
-	rv := rptr.Elem()
 	select {
-	case <-*ss.connClose:
+	case <-connClose:
 		return io.EOF
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
@@ -85,6 +85,8 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 		if msgPtr == nil { // msgPtr is nil
 			return nil // user just looks at error, no error here
 		}
+
+		rv := rptr.Elem()
 		defer func() {
 			if e := recover(); e != nil {
 				err = fmt.Errorf("message type mismatch: %v", e)
@@ -270,6 +272,7 @@ func (cs *chanClientStream) Send(msg interface{}) error {
 }
 
 func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
+	msgChan := cs.msgChan
 	if cs.msgChan == nil {
 		return io.EOF
 	}
@@ -278,7 +281,7 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
-	msg := <-cs.msgChan
+	msg := <-msgChan
 	if err, ok := msg.(error); ok { // message handler returned error
 		if err == io.EOF {
 			cs.msgChan = nil
