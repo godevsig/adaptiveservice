@@ -158,6 +158,7 @@ type streamServerStream struct {
 	chanID      uint64 // client stream channel ID, taken from transport msg
 	enc         *gotiny.Encoder
 	encMainCopy int32
+	timeouter
 }
 
 func (ss *streamServerStream) GetNetconn() Netconn {
@@ -214,9 +215,10 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 	select {
 	case <-connClose:
 		return io.EOF
+	case <-ss.timeouter.timeoutChan():
+		return ErrRecvTimeout
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
-			err = fmt.Errorf("client error: %w", err)
 			return err
 		}
 		if msgPtr == nil { // msgPtr is nil
@@ -437,6 +439,7 @@ type streamClientStream struct {
 	msgChan     chan interface{}
 	encMainCopy int32
 	enc         *gotiny.Encoder
+	timeouter
 }
 
 // stream connection for client.
@@ -610,36 +613,35 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
-	var msg interface{}
 	select {
 	case <-connClosed:
 		return ErrConnReset
-	case msg = <-cs.msgChan:
-	}
-	if err, ok := msg.(error); ok { // message handler returned error
-		if err == io.EOF {
-			cs.msgChan = nil
-		} else {
-			err = fmt.Errorf("server error: %w", err)
+	case <-cs.timeouter.timeoutChan():
+		return ErrRecvTimeout
+	case msg := <-cs.msgChan:
+		if err, ok := msg.(error); ok { // message handler returned error
+			if err == io.EOF {
+				cs.msgChan = nil
+			}
+			return err
 		}
-		return err
-	}
 
-	if msgPtr == nil { // msgPtr is nil
-		return nil // user just looks at error, no error here
-	}
-
-	rv := rptr.Elem()
-	mrv := reflect.ValueOf(msg)
-	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
-		mrv = mrv.Elem()
-	}
-	defer func() {
-		if e := recover(); e != nil {
-			err = fmt.Errorf("message type mismatch: %v", e)
+		if msgPtr == nil { // msgPtr is nil
+			return nil // user just looks at error, no error here
 		}
-	}()
-	rv.Set(mrv)
+
+		rv := rptr.Elem()
+		mrv := reflect.ValueOf(msg)
+		if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
+			mrv = mrv.Elem()
+		}
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("message type mismatch: %v", e)
+			}
+		}()
+		rv.Set(mrv)
+	}
 
 	return
 }

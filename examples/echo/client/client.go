@@ -20,6 +20,47 @@ func Run(cmd string, opts []as.Option) {
 	}
 	defer conn.Close()
 
+	if cmd == "timeout" {
+		stream := conn.NewStream()
+		fmt.Println("No timeout by default")
+		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("Recv OK")
+
+		fmt.Println("Set timeout to 15s")
+		stream.SetRecvTimeout(15 * time.Second)
+		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("Recv OK")
+
+		fmt.Println("Set timeout to 3s")
+		stream.SetRecvTimeout(3 * time.Second)
+		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println("Some error happend")
+		}
+		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
+			fmt.Println(err)
+		} else {
+			fmt.Println("Some error happend")
+		}
+
+		fmt.Println("Set back to no timeout")
+		stream.SetRecvTimeout(0)
+		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("Recv OK")
+
+		return
+	}
+
 	if cmd == "whoelse" {
 		go func() {
 			eventStream := conn.NewStream()

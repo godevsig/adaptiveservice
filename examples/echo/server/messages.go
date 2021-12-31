@@ -75,6 +75,15 @@ func (msg WhoElse) Handle(stream as.ContextStream) (reply interface{}) {
 	return addrs
 }
 
+// MessageTimeout is for timeout test
+type MessageTimeout struct{}
+
+// Handle handles msg.
+func (msg MessageTimeout) Handle(stream as.ContextStream) (reply interface{}) {
+	time.Sleep(10 * time.Second)
+	return as.OK
+}
+
 type sessionInfo struct {
 	sessionName string
 	mgr         *statMgr
@@ -116,6 +125,7 @@ var echoKnownMsgs = []as.KnownMessage{
 	(*MessageRequest)(nil),
 	SubWhoElseEvent{},
 	WhoElse{},
+	MessageTimeout{},
 }
 
 func init() {
@@ -123,4 +133,5 @@ func init() {
 	as.RegisterType((*MessageReply)(nil))
 	as.RegisterType(SubWhoElseEvent{})
 	as.RegisterType(WhoElse{})
+	as.RegisterType(MessageTimeout{})
 }

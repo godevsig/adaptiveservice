@@ -50,6 +50,7 @@ type chanServerStream struct {
 	connClose   *chan struct{}
 	srcChan     chan interface{}
 	privateChan chan interface{} // dedicated to the client
+	timeouter
 }
 
 func (ss *chanServerStream) GetNetconn() Netconn {
@@ -77,9 +78,10 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 	select {
 	case <-connClose:
 		return io.EOF
+	case <-ss.timeouter.timeoutChan():
+		return ErrRecvTimeout
 	case msg := <-ss.privateChan:
 		if err, ok := msg.(error); ok {
-			err = fmt.Errorf("client error: %w", err)
 			return err
 		}
 		if msgPtr == nil { // msgPtr is nil
@@ -95,7 +97,7 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 		rv.Set(reflect.ValueOf(msg))
 	}
 
-	return nil
+	return
 }
 
 func (ss *chanServerStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error {
@@ -209,6 +211,7 @@ func (ct *chanTransport) receiver() {
 type chanClientStream struct {
 	conn    *chanConnection
 	msgChan chan interface{}
+	timeouter
 }
 
 type clientChanTransport struct {
@@ -281,32 +284,34 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
-	msg := <-msgChan
-	if err, ok := msg.(error); ok { // message handler returned error
-		if err == io.EOF {
-			cs.msgChan = nil
-		} else {
-			err = fmt.Errorf("server error: %w", err)
+	select {
+	case <-cs.timeouter.timeoutChan():
+		return ErrRecvTimeout
+	case msg := <-msgChan:
+		if err, ok := msg.(error); ok { // message handler returned error
+			if err == io.EOF {
+				cs.msgChan = nil
+			}
+			return err
 		}
-		return err
-	}
-	if msgPtr == nil { // msgPtr is nil
-		return nil // user just looks at error, no error here
+		if msgPtr == nil { // msgPtr is nil
+			return nil // user just looks at error, no error here
+		}
+
+		rv := rptr.Elem()
+		mrv := reflect.ValueOf(msg)
+		if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
+			mrv = mrv.Elem()
+		}
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("message type mismatch: %v", e)
+			}
+		}()
+		rv.Set(mrv)
 	}
 
-	rv := rptr.Elem()
-	mrv := reflect.ValueOf(msg)
-	if rv.Kind() != reflect.Ptr && mrv.Kind() == reflect.Ptr {
-		mrv = mrv.Elem()
-	}
-	defer func() {
-		if e := recover(); e != nil {
-			err = fmt.Errorf("message type mismatch: %v", e)
-		}
-	}()
-	rv.Set(mrv)
-
-	return nil
+	return
 }
 
 func (cs *chanClientStream) SendRecv(msgSnd interface{}, msgRcvPtr interface{}) error {

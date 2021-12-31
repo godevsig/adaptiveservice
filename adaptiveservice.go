@@ -94,6 +94,9 @@ var (
 	ErrConnReset = errors.New("connection reset by peer")
 	// ErrServerClosed is an error where the server was closed by signal.
 	ErrServerClosed = errors.New("server closed by signal")
+	// ErrRecvTimeout is an error where no data was received within
+	// specified duration.
+	ErrRecvTimeout = errors.New("receive timeout")
 )
 
 type errServiceNotFound struct {

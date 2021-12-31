@@ -2,6 +2,7 @@ package adaptiveservice
 
 import (
 	"net"
+	"time"
 )
 
 // Netconn is the underlying net connection.
@@ -46,6 +47,12 @@ type Stream interface {
 
 	// GetNetconn gets the transport connection.
 	GetNetconn() Netconn
+
+	// SetRecvTimeout sets the timeout for each Recv(), which waits at least duration
+	// d and returns ErrRecvTimeout if no data was received within that duration.
+	// A negative or zero duration causes Recv() waits forever.
+	// Default is 0.
+	SetRecvTimeout(d time.Duration)
 }
 
 // ContextStream is a stream with an associated context.
@@ -54,4 +61,20 @@ type Stream interface {
 type ContextStream interface {
 	Context
 	Stream
+}
+
+type timeouter struct {
+	d time.Duration
+}
+
+func (to *timeouter) SetRecvTimeout(d time.Duration) {
+	to.d = d
+}
+
+func (to *timeouter) timeoutChan() (timeoutChan chan struct{}) {
+	if to.d > 0 {
+		timeoutChan = make(chan struct{}, 1)
+		time.AfterFunc(to.d, func() { timeoutChan <- struct{}{} })
+	}
+	return
 }
