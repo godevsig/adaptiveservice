@@ -60,6 +60,11 @@ if err := conn.SendRecv(request, &reply); err != nil {
 fmt.Println(reply.Answer)
 ```
 
+Here the client knows the protocol with the sersver that `msg.HelloReply` is the reply
+type of `msg.HelloRequest`. The knowledge of message protocol is "business logic",
+defined in server side, clients use such knowledge by importing the "message" package
+of the serveer.
+
 ### Client discovers service by name
 
 `c.Discover()` discovers the wanted named service in all available scopes, which are:
@@ -131,6 +136,7 @@ type system which are used to route the incoming request message(`HelloRequest` 
 
 - Incoming message are handled concurrently in a goroutine worker pool
 - The reply returned by the handler will be delivered to the client if it is none-nil.
+- The reply can also be an error, which will be delivered as err in `Recv(msgPtr) err` of client.
 - `as.ContextStream` can be optionally used:
   - Each stream has its own [context](https://pkg.go.dev/github.com/godevsig/adaptiveservice#Context)
     which can be used to set/get context of the same stream.
