@@ -63,7 +63,7 @@ fmt.Println(reply.Answer)
 Here the client knows the protocol with the sersver that `msg.HelloReply` is the reply
 type of `msg.HelloRequest`. The knowledge of message protocol is "business logic",
 defined in server side, clients use such knowledge by importing the "message" package
-of the serveer.
+of the server.
 
 ### Client discovers service by name
 
