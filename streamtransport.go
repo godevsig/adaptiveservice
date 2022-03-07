@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -34,16 +33,11 @@ func makeStreamTransport(svc *service, lnr net.Listener) *streamTransport {
 }
 
 func (svc *service) newUDSTransport() (*streamTransport, error) {
-	addrs := lookupServiceUDS(svc.publisherName, svc.serviceName)
-	if len(addrs) != 0 {
-		return nil, fmt.Errorf("socket already exists: %v", addrs)
-	}
-	addr := addrUDS(svc.publisherName, svc.serviceName)
+	addr := toUDSAddr(svc.publisherName, svc.serviceName)
 	lnr, err := net.Listen("unix", addr)
 	if err != nil {
 		return nil, err
 	}
-	os.Chmod(addr, 0777) // allow other local users to dial
 
 	st := makeStreamTransport(svc, lnr)
 	go st.receiver()
