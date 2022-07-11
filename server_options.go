@@ -14,7 +14,10 @@ func (s *Server) SetPublisher(publisher string) *Server {
 }
 
 // SetScaleFactor sets the scale factors:
-//  qWeight: smaller qWeight results higher message handling concurrency.
+// The size of the message queue is qWeight * qScale * CPU num.
+// (n-1)*qWeight+1 .. n*qWeight messages in the queue ==> n workers, where
+// n >=1 && n <= qScale * CPU num
+//  qWeight: how many messages a worker can handle before a new worker is created.
 //  qScale: the maximum goroutines to handle message per CPU core.
 // You should know what you are doing with these parameters.
 func (s *Server) SetScaleFactor(qWeight, qScale int) *Server {

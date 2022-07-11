@@ -18,20 +18,8 @@ func newWorkerPool() *workerPool {
 	return &workerPool{}
 }
 
-type status interface {
-	idle()
-	working()
-}
-
-func (wp *workerPool) idle() {
-	atomic.AddInt32(&wp.cnt, 1)
-}
-func (wp *workerPool) working() {
-	atomic.AddInt32(&wp.cnt, -1)
-}
-
 // worker is a function with a cancel channel it should check for exit.
-type worker func(done <-chan struct{}, st status)
+type worker func(done <-chan struct{})
 
 // addWorker adds a worker into the workerPool.
 func (wp *workerPool) addWorker(w worker) {
@@ -60,7 +48,7 @@ func (wp *workerPool) addWorker(w worker) {
 			atomic.AddInt32(&wp.cnt, -1)
 			wp.wg.Done()
 		}()
-		w(done, wp)
+		w(done)
 	}()
 }
 
@@ -99,7 +87,7 @@ func (wp *workerPool) close() {
 	wp.wg.Wait()
 }
 
-// len returns the number of idle workers in the workerPool.
+// len returns the number of running workers in the workerPool.
 func (wp *workerPool) len() int {
 	cnt := atomic.LoadInt32(&wp.cnt)
 	return int(cnt)
