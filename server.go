@@ -23,8 +23,8 @@ type Server struct {
 	ipObserver       bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
-	qWeight          int
-	qScale           int
+	residentWorkers  int
+	qSizePerCore     int
 	msgTypeCheck     bool
 	closers          []closer
 	initialized      bool
@@ -34,13 +34,13 @@ type Server struct {
 // NewServer creates a server which publishes services.
 func NewServer(options ...Option) *Server {
 	s := &Server{
-		conf:         newConf(),
-		publisher:    "default.org",
-		errRecovers:  make(chan errorRecover, 1),
-		qWeight:      8,
-		qScale:       8,
-		msgTypeCheck: true,
-		closed:       make(chan struct{}),
+		conf:            newConf(),
+		publisher:       "default.org",
+		errRecovers:     make(chan errorRecover, 1),
+		residentWorkers: 1,
+		qSizePerCore:    32,
+		msgTypeCheck:    true,
+		closed:          make(chan struct{}),
 	}
 
 	for _, o := range options {
@@ -82,7 +82,7 @@ func (s *Server) init() error {
 	s.initialized = true
 	initSigCleaner(s.lg)
 	addSigCloser(s)
-	s.mq = newMsgQ(s.qWeight, s.qScale, s.lg)
+	s.mq = newMsgQ(s.residentWorkers, s.qSizePerCore, s.lg)
 	s.addCloser(s.mq)
 
 	if s.scope&ScopeLAN == ScopeLAN {

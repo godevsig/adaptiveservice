@@ -15,8 +15,7 @@ type msgQ struct {
 	sync.Mutex
 	wp                *workerPool
 	lg                Logger
-	qWeight           int
-	qScale            int
+	residentWorkers   int
 	qSize             int
 	ingressHighChan   chan *metaKnownMsg
 	ingressNormalChan chan *metaKnownMsg
@@ -26,13 +25,12 @@ type msgQ struct {
 	done              chan struct{}
 }
 
-func newMsgQ(qWeight, qScale int, lg Logger) *msgQ {
-	qSize := qWeight * qScale * runtime.NumCPU()
+func newMsgQ(residentWorkers, qSizePerCore int, lg Logger) *msgQ {
+	qSize := qSizePerCore * runtime.NumCPU()
 	mq := &msgQ{
 		wp:                newWorkerPool(),
 		lg:                lg,
-		qWeight:           qWeight,
-		qScale:            qScale,
+		residentWorkers:   residentWorkers,
 		qSize:             qSize,
 		ingressNormalChan: make(chan *metaKnownMsg, qSize),
 		done:              make(chan struct{}),
@@ -110,12 +108,19 @@ func (mq *msgQ) worker(done <-chan struct{}) {
 }
 
 func (mq *msgQ) autoScaler() {
+	for i := 0; i < mq.residentWorkers; i++ {
+		mq.wp.addWorker(mq.worker)
+	}
+
 	for {
 		if mq.done == nil {
 			return
 		}
 		egressChan := mq.getEgressChan()
-		should := len(egressChan)/mq.qWeight + 1
+		should := len(egressChan)
+		if should < mq.residentWorkers {
+			should = mq.residentWorkers
+		}
 		now := mq.wp.len()
 
 		k := 1
