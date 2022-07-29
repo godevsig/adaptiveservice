@@ -91,18 +91,20 @@ func (mq *msgQ) reorder() {
 	}
 }
 
-func (mq *msgQ) worker(done <-chan struct{}) {
+func (mq *msgQ) worker(done <-chan struct{}, st status) {
 	for {
 		select {
 		case <-done:
 			return
 		case mm := <-mq.getEgressChan():
+			st.working()
 			reply := mm.msg.Handle(mm.stream)
 			mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
 			//mq.lg.Debugf("message: %T handled, reply: %T", mm.msg, reply)
 			if reply != nil {
 				mm.stream.Send(reply)
 			}
+			st.idle()
 		}
 	}
 }
@@ -117,11 +119,8 @@ func (mq *msgQ) autoScaler() {
 			return
 		}
 		egressChan := mq.getEgressChan()
-		should := len(egressChan)
-		if should < mq.residentWorkers {
-			should = mq.residentWorkers
-		}
-		now := mq.wp.len()
+		should := len(egressChan) + mq.residentWorkers
+		now := mq.wp.len() // idle works
 
 		k := 1
 		switch {
