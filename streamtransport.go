@@ -148,8 +148,7 @@ type streamServerStream struct {
 	netconn     net.Conn
 	connClose   *chan struct{}
 	privateChan chan interface{} // dedicated to the client
-	qsize       int
-	chanID      uint64 // client stream channel ID, taken from transport msg
+	chanID      uint64           // client stream channel ID, taken from transport msg
 	enc         *gotiny.Encoder
 	encMainCopy int32
 	timeouter
@@ -294,8 +293,12 @@ func (st *streamTransport) receiver() {
 		for {
 			netconn, err := lnr.Accept()
 			if err != nil {
-				lg.Debugf("stream transport listener closed: %v", err)
-				return
+				lg.Warnf("stream transport listener: %v", err)
+				// the streamTransport has been closed
+				if st.closed == nil {
+					return
+				}
+				continue
 			}
 			if !pinged {
 				host, _, _ := net.SplitHostPort(netconn.RemoteAddr().String())
@@ -377,15 +380,13 @@ func (st *streamTransport) receiver() {
 
 			ss := ssMap[tm.chanID]
 			if ss == nil {
-				qsize := st.svc.s.qsize
 				ss = &streamServerStream{
 					Context:     &contextImpl{},
 					mtx:         &mtx,
 					lg:          lg,
 					netconn:     netconn,
 					connClose:   &connClose,
-					privateChan: make(chan interface{}, qsize),
-					qsize:       qsize,
+					privateChan: make(chan interface{}, st.svc.s.qsize),
 					chanID:      tm.chanID,
 					enc:         gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 				}

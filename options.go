@@ -52,7 +52,7 @@ func WithRegistryAddr(addr string) Option {
 	}
 }
 
-// WithQsize sets the internal message queue size.
+// WithQsize sets the transport layer message queue size.
 func WithQsize(size int) Option {
 	return func(c *conf) {
 		c.qsize = size
