@@ -104,6 +104,7 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 		return nil
 	}
 
+	distinctEntires := make(map[string]struct{})
 	tName := publisherName + "_" + serviceName
 	//skip first line
 	b.ReadString('\n')
@@ -118,6 +119,11 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 			addr := fs[7]
 			if strings.Contains(addr, udsRegistry) {
 				name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
+				// there can be multiple entires with the same name
+				if _, has := distinctEntires[name]; has {
+					continue
+				}
+				distinctEntires[name] = struct{}{}
 				if wildcardMatch(tName, name) {
 					names = append(names, name)
 				}
