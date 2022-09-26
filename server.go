@@ -151,7 +151,6 @@ func (s *Server) init() error {
 			return err
 		}
 
-		go s.registryCheckSaver()
 		s.lg.Infof("root registry started at %s", port)
 	}
 

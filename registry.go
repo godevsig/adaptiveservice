@@ -623,6 +623,42 @@ type rootRegistry struct {
 	serviceMap map[string]*providerMap
 }
 
+// name: publisher_service, can be wildcard
+func (rr *rootRegistry) walkProviders(name string, fn func(service, pID string, pInfo *providerInfo) (remove bool)) {
+	walkProviderMap := func(service string, pmap *providerMap) {
+		pmap.RLock()
+		for pID, pInfo := range pmap.providers {
+			pmap.RUnlock()
+			if fn(service, pID, pInfo) {
+				pmap.Lock()
+				delete(pmap.providers, pID)
+				pmap.Unlock()
+			}
+			pmap.RLock()
+		}
+		pmap.RUnlock()
+	}
+
+	if strings.Contains(name, "*") {
+		rr.RLock()
+		for service, pmap := range rr.serviceMap {
+			rr.RUnlock()
+			if wildcardMatch(name, service) {
+				walkProviderMap(service, pmap)
+			}
+			rr.RLock()
+		}
+		rr.RUnlock()
+	} else {
+		rr.RLock()
+		pmap, has := rr.serviceMap[name]
+		rr.RUnlock()
+		if has {
+			walkProviderMap(name, pmap)
+		}
+	}
+}
+
 func pingService(addr string) error {
 	conn, err := net.DialTimeout("tcp", addr, time.Second)
 	if err != nil {
@@ -710,6 +746,20 @@ func (msg *delServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	return nil
 }
 
+func makeServiceInfo(service, pID string, pInfo *providerInfo) *ServiceInfo {
+	addr := pInfo.addr
+	if pInfo.proxied {
+		addr += "P"
+	}
+	svcInfo := &ServiceInfo{ProviderID: pID, Addr: addr}
+	if len(service) != 0 {
+		ss := strings.Split(service, "_")
+		svcInfo.Publisher = ss[0]
+		svcInfo.Service = ss[1]
+	}
+	return svcInfo
+}
+
 // reply []*ServiceInfo
 // support wildcard(*) matching
 type queryServiceInWAN struct {
@@ -722,56 +772,10 @@ func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	name := msg.publisher + "_" + msg.service
 	var serviceInfos []*ServiceInfo
 
-	walkProviderMap := func(service string, pmap *providerMap) {
-		pmap.RLock()
-		for pID, pInfo := range pmap.providers {
-			func() {
-				pmap.RUnlock()
-				defer pmap.RLock()
-				t := time.Now()
-				if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
-					if err := pingService(pInfo.addr); err != nil {
-						pmap.Lock()
-						delete(pmap.providers, pID)
-						pmap.Unlock()
-						return
-					}
-					pInfo.timeStamp = t
-				}
-				addr := pInfo.addr
-				if pInfo.proxied {
-					addr += "P"
-				}
-				svcInfo := &ServiceInfo{ProviderID: pID, Addr: addr}
-				if len(service) != 0 {
-					ss := strings.Split(service, "_")
-					svcInfo.Publisher = ss[0]
-					svcInfo.Service = ss[1]
-				}
-				serviceInfos = append(serviceInfos, svcInfo)
-			}()
-		}
-		pmap.RUnlock()
-	}
-
-	if strings.Contains(name, "*") {
-		rr.RLock()
-		for service, pmap := range rr.serviceMap {
-			rr.RUnlock()
-			if wildcardMatch(name, service) {
-				walkProviderMap(service, pmap)
-			}
-			rr.RLock()
-		}
-		rr.RUnlock()
-	} else {
-		rr.RLock()
-		pmap, has := rr.serviceMap[name]
-		rr.RUnlock()
-		if has {
-			walkProviderMap("", pmap)
-		}
-	}
+	rr.walkProviders(name, func(service, pID string, pInfo *providerInfo) (remove bool) {
+		serviceInfos = append(serviceInfos, makeServiceInfo(service, pID, pInfo))
+		return false
+	})
 
 	return serviceInfos
 }
@@ -783,16 +787,32 @@ func init() {
 	RegisterType((*testReverseProxy)(nil))
 }
 
-func (s *Server) registryCheckSaver() {
+func (s *Server) registryCheckSaver(rr *rootRegistry) {
 	for {
 		time.Sleep(time.Minute)
-		svcs := queryServiceWAN(s.registryAddr, "*", "*", s.lg)
+
+		var serviceInfos []*ServiceInfo
+		rr.walkProviders("*", func(service, pID string, pInfo *providerInfo) (remove bool) {
+			t := time.Now()
+			if err := pingService(pInfo.addr); err != nil {
+				if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
+					s.lg.Infof("removing provider ID %s: %v from service %s", pID, pInfo, service)
+					return true
+				}
+			} else {
+				// update time stamp if ping succeeded
+				pInfo.timeStamp = t
+			}
+			serviceInfos = append(serviceInfos, makeServiceInfo(service, pID, pInfo))
+			return false
+		})
+
 		f, err := os.Create("services.record.updating")
 		if err != nil {
 			s.lg.Errorf("root registry: record file not created: %v", err)
-			return
+			continue
 		}
-		for _, si := range svcs {
+		for _, si := range serviceInfos {
 			fmt.Fprintf(f, "%s %s %s %s\n", si.Publisher, si.Service, si.ProviderID, si.Addr)
 		}
 		f.Close()
@@ -847,5 +867,7 @@ func (s *Server) startRootRegistry(port string) error {
 		return err
 	}
 	s.addCloser(tran)
+
+	go s.registryCheckSaver(rr)
 	return nil
 }
