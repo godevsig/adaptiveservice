@@ -389,23 +389,28 @@ func (r *registryLAN) queryServiceInLAN(publisher, service string) []*ServiceInf
 }
 
 func (r *registryLAN) run() {
+	type localSvcInfo struct {
+		timeStamp time.Time
+		port      string
+	}
 	pconn := r.packetConn
 	lg := r.s.lg
 	packetChan := make(chan *packetMsg)
-	// "publisher_service": "12345"
-	localServiceTable := make(map[string]string)
+	// "publisher_service": {time.time, "12345"}
+	localServiceTable := make(map[string]*localSvcInfo)
 	// "publisher_service": {time.Time, {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}}
 	serviceCache := make(map[string]*providers)
 
 	f, err := os.Open("local_services.record")
 	if err == nil {
+		t := time.Now()
 		for {
 			var name, port string
 			_, err := fmt.Fscanln(f, &name, &port)
 			if err != nil {
 				break
 			}
-			localServiceTable[name] = port
+			localServiceTable[name] = &localSvcInfo{t, port}
 		}
 		f.Close()
 		os.Remove("local_services.record")
@@ -446,11 +451,12 @@ func (r *registryLAN) run() {
 		walkProviders := func(prvds *providers, name string) {
 			ss := strings.Split(name, "_")
 			for pID, pInfo := range prvds.table {
+				if time.Since(pInfo.timeStamp) > 10*time.Minute {
+					delete(prvds.table, pID)
+					continue
+				}
 				svcInfo := &ServiceInfo{Publisher: ss[0], Service: ss[1], ProviderID: pID, Addr: pInfo.addr}
 				serviceInfos = append(serviceInfos, svcInfo)
-				if time.Since(pInfo.timeStamp) > 15*time.Minute {
-					delete(prvds.table, pID)
-				}
 			}
 		}
 
@@ -476,7 +482,8 @@ func (r *registryLAN) run() {
 		}
 	}
 
-	tLocalServiceUpdate := time.Now()
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
 	chanDelay := make(chan *cmdLANQuery, 8)
 	for {
 		select {
@@ -492,7 +499,7 @@ func (r *registryLAN) run() {
 		case cmd := <-r.cmdChan:
 			switch cmd := cmd.(type) {
 			case *cmdLANRegister:
-				localServiceTable[cmd.name] = cmd.port
+				localServiceTable[cmd.name] = &localSvcInfo{time.Now(), cmd.port}
 			case *cmdLANDelete:
 				delService(cmd.name)
 			case *cmdLANQuery:
@@ -506,30 +513,32 @@ func (r *registryLAN) run() {
 			}
 		case cmd := <-chanDelay:
 			getServiceInfos(cmd)
-		case packetMsg := <-packetChan:
+		case <-ticker.C:
 			t := time.Now()
-			if t.After(tLocalServiceUpdate.Add(15 * time.Minute)) {
-				tLocalServiceUpdate = t
-				for name, port := range localServiceTable {
-					if err := pingService("127.0.0.1:" + port); err != nil {
+			for name, lsi := range localServiceTable {
+				if err := pingService("127.0.0.1:" + lsi.port); err != nil {
+					if t.After(lsi.timeStamp.Add(5 * time.Minute)) {
 						delService(name)
 					}
+				} else {
+					lsi.timeStamp = t
 				}
 			}
+		case packetMsg := <-packetChan:
 			msg := packetMsg.msg
 			raddr := packetMsg.raddr
 			switch msg := msg.(type) {
 			case *queryInLAN:
 				if strings.Contains(msg.name, "*") {
-					for name, port := range localServiceTable {
+					for name, lsi := range localServiceTable {
 						if wildcardMatch(msg.name, name) {
-							replyTo(&foundInLAN{name, r.s.providerID, port}, raddr)
+							replyTo(&foundInLAN{name, r.s.providerID, lsi.port}, raddr)
 						}
 					}
 				} else {
-					port, has := localServiceTable[msg.name]
+					lsi, has := localServiceTable[msg.name]
 					if has {
-						replyTo(&foundInLAN{msg.name, r.s.providerID, port}, raddr)
+						replyTo(&foundInLAN{msg.name, r.s.providerID, lsi.port}, raddr)
 					}
 				}
 			case *foundInLAN:
