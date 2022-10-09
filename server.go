@@ -25,6 +25,7 @@ type Server struct {
 	mq               *msgQ
 	residentWorkers  int
 	qSizePerCore     int
+	qWeight          int
 	msgTypeCheck     bool
 	closers          []closer
 	initialized      bool
@@ -38,7 +39,8 @@ func NewServer(options ...Option) *Server {
 		publisher:       "default.org",
 		errRecovers:     make(chan errorRecover, 1),
 		residentWorkers: 1,
-		qSizePerCore:    32,
+		qSizePerCore:    128,
+		qWeight:         16,
 		msgTypeCheck:    true,
 		closed:          make(chan struct{}),
 	}
@@ -82,7 +84,7 @@ func (s *Server) init() error {
 	s.initialized = true
 	initSigCleaner(s.lg)
 	addSigCloser(s)
-	s.mq = newMsgQ(s.residentWorkers, s.qSizePerCore, s.lg)
+	s.mq = newMsgQ(s.residentWorkers, s.qSizePerCore, s.qWeight, s.lg)
 	s.addCloser(s.mq)
 
 	if s.scope&ScopeLAN == ScopeLAN {

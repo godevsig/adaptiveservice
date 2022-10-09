@@ -17,6 +17,7 @@ type msgQ struct {
 	lg                Logger
 	residentWorkers   int
 	qSize             int
+	qWeight           int
 	ingressHighChan   chan *metaKnownMsg
 	ingressNormalChan chan *metaKnownMsg
 	ingressLowChan    chan *metaKnownMsg
@@ -25,17 +26,25 @@ type msgQ struct {
 	done              chan struct{}
 }
 
-func newMsgQ(residentWorkers, qSizePerCore int, lg Logger) *msgQ {
+func newMsgQ(residentWorkers, qSizePerCore, qWeight int, lg Logger) *msgQ {
 	qSize := qSizePerCore * runtime.NumCPU()
 	mq := &msgQ{
 		wp:                newWorkerPool(),
 		lg:                lg,
 		residentWorkers:   residentWorkers,
 		qSize:             qSize,
+		qWeight:           qWeight,
 		ingressNormalChan: make(chan *metaKnownMsg, qSize),
 		done:              make(chan struct{}),
 	}
-	go mq.autoScaler()
+
+	for i := 0; i < mq.residentWorkers; i++ {
+		mq.wp.addWorker(mq.worker)
+	}
+	if qWeight > 0 {
+		go mq.autoScaler()
+	}
+
 	lg.Debugf("msgq created with qSize %v", qSize)
 	return mq
 }
@@ -110,17 +119,13 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 }
 
 func (mq *msgQ) autoScaler() {
-	for i := 0; i < mq.residentWorkers; i++ {
-		mq.wp.addWorker(mq.worker)
-	}
-
 	for {
 		if mq.done == nil {
 			return
 		}
 		egressChan := mq.getEgressChan()
-		should := len(egressChan) + mq.residentWorkers
-		now := mq.wp.len() // idle works
+		should := len(egressChan)/mq.qWeight + mq.residentWorkers
+		now := mq.wp.len() // idle workers
 
 		k := 1
 		switch {

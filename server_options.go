@@ -14,14 +14,36 @@ func (s *Server) SetPublisher(publisher string) *Server {
 }
 
 // SetScaleFactors sets the scale factors to be applied on the internal message queue.
-//  residentWorkers: the number of resident workers. Default is 1.
-//  qSizePerCore: the internal message queue size per core. Default is 32.
+//  residentWorkers:
+//    > 0: the number of resident workers.
+//   <= 0: uses default value. Default is 1.
+//  qSizePerCore:
+//    > 0: the internal message queue size per core.
+//   <= 0: uses default value. Default is 128.
+//  qWeight:
+//    > 0: the weight of the message queue.
+//      0: uses default value. Default is 16.
+//    < 0: the number of workers is fixed at residentWorkers.
 // A Server has one internal message queue, messages received from transport layer are put into
 // the queue, a number of workers get message from the queue and handle it.
-// The number of wokers scales automatically from residentWorkers to qSizePerCore * core number.
-func (s *Server) SetScaleFactors(residentWorkers, qSizePerCore int) *Server {
-	s.residentWorkers = residentWorkers
-	s.qSizePerCore = qSizePerCore
+// When qWeight >= 0, the number of wokers scales automatically from residentWorkers to
+// qSizePerCore*core number/qWeight + residentWorkers.
+// Be careful to set qWeight < 0, which effectively disables auto scala worker pool, which
+// in turn only uses fixed number of workers(residentWorkers). Forever blocking may occur in
+// such case, especially when residentWorkers = 1.
+func (s *Server) SetScaleFactors(residentWorkers, qSizePerCore, qWeight int) *Server {
+	if residentWorkers > 0 {
+		s.residentWorkers = residentWorkers
+	}
+
+	if qSizePerCore > 0 {
+		s.qSizePerCore = qSizePerCore
+	}
+
+	if qWeight != 0 {
+		s.qWeight = qWeight
+	}
+
 	return s
 }
 
