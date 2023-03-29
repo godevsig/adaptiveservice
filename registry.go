@@ -186,6 +186,7 @@ func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos
 	return
 }
 
+// support wildcard
 func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
 	serviceInfos := queryServiceLAN(publisherName, serviceName, c.lg)
 	has := func(target string) bool {
@@ -193,7 +194,7 @@ func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs
 			return true
 		}
 		for _, str := range providerIDs {
-			if str == target {
+			if wildcardMatch(str, target) {
 				return true
 			}
 		}
@@ -599,13 +600,14 @@ func queryServiceWAN(registryAddr, publisherName, serviceName string, lg Logger)
 	return
 }
 
+// support wildcard
 func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
 		}
 		for _, str := range providerIDs {
-			if str == target {
+			if wildcardMatch(str, target) {
 				return true
 			}
 		}

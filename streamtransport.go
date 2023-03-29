@@ -293,7 +293,7 @@ func (st *streamTransport) receiver() {
 		for {
 			netconn, err := lnr.Accept()
 			if err != nil {
-				lg.Warnf("stream transport listener: %v", err)
+				lg.Debugf("stream transport listener: %v", err)
 				// the streamTransport has been closed
 				if st.closed == nil {
 					return
@@ -416,6 +416,12 @@ func (st *streamTransport) receiver() {
 		}
 	}
 
+	defer func() {
+		for netconn := range st.chanNetConn {
+			netconn.Close()
+		}
+	}()
+
 	closed := st.closed
 	for {
 		select {
@@ -458,6 +464,7 @@ func (c *Client) newStreamConnection(network string, addr string) (*streamConnec
 		return nil, err
 	}
 	if proxied {
+		// wait real server to connect
 		if _, err := netconn.Read([]byte{0}); err != nil {
 			return nil, err
 		}

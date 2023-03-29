@@ -180,6 +180,7 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 		if err := stream.Recv(nil); err != nil {
 			s.lg.Debugf("service cmdconn read lost, closing its proxy")
 			reversetran.close()
+			close(chanServerConn)
 			if proxytran != nil {
 				proxytran.close()
 			}
@@ -197,12 +198,17 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 			return true
 		}
 		serverConn := <-chanServerConn
+		if serverConn == nil {
+			clientConn.Close()
+			return true
+		}
 		go func() {
 			io.Copy(serverConn, clientConn)
 			serverConn.Close()
 			s.lg.Debugf("io copy client => server done")
 		}()
 		go func() {
+			// acknowledge client real server connected
 			clientConn.Write([]byte{0})
 			io.Copy(clientConn, serverConn)
 			clientConn.Close()

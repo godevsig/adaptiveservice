@@ -106,29 +106,46 @@ func Run(cmd string, opts []as.Option) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for j := 0; j < 1025; j++ {
+		c := as.NewClient(opts...).SetDeepCopy()
+		conn := <-c.Discover(echo.Publisher, echo.ServiceEcho)
+		if conn == nil {
+			fmt.Println(as.ErrServiceNotFound(echo.Publisher, echo.ServiceEcho))
+			os.Exit(1)
+		}
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			stream := conn.NewStream()
-			req := echo.MessageRequest{
-				Msg: "ni hao",
-				Num: 100 * int32(i),
+			defer conn.Close()
+
+			var wg sync.WaitGroup
+			for i := 0; i < 10; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					stream := conn.NewStream()
+					req := echo.MessageRequest{
+						Msg: "ni hao",
+						Num: 100 * int32(i),
+					}
+					var rep echo.MessageReply
+					for i := 0; i < 9; i++ {
+						req.Num += 10
+						if err := stream.SendRecv(&req, &rep); err != nil {
+							fmt.Println(err)
+							return
+						}
+						if req.Num+1 != rep.Num {
+							panic("wrong number")
+						}
+						fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
+						//time.Sleep(time.Second)
+					}
+				}(i)
 			}
-			var rep echo.MessageReply
-			for i := 0; i < 9; i++ {
-				req.Num += 10
-				if err := stream.SendRecv(&req, &rep); err != nil {
-					fmt.Println(err)
-					return
-				}
-				if req.Num+1 != rep.Num {
-					panic("wrong number")
-				}
-				fmt.Printf("%v ==> %v, %s\n", req, rep.MessageRequest, rep.Signature)
-				//time.Sleep(time.Second)
-			}
-		}(i)
+			wg.Wait()
+		}()
 	}
+
 	wg.Wait()
 }

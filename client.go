@@ -56,8 +56,9 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		if len(target) == 0 {
 			return false
 		}
+		// str can be wildcard
 		for _, str := range providerIDs {
-			if str == target {
+			if wildcardMatch(str, target) {
 				return true
 			}
 		}
@@ -65,11 +66,13 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 	}
 
 	expect := 1
+	if strings.Contains(publisher+service, "*") {
+		expect = -1
+	}
 	if len(providerIDs) != 0 {
 		expect = len(providerIDs)
-		if has("*") {
-			expect = -1 // all
-			providerIDs = nil
+		if strings.Contains(strings.Join(providerIDs, " "), "*") {
+			expect = -1
 		}
 		if len(c.providerID) == 0 {
 			providerID, err := discoverProviderID(c.lg)
@@ -78,9 +81,6 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			}
 			c.providerID = providerID
 		}
-	}
-	if strings.Contains(publisher+service, "*") {
-		expect = -1
 	}
 
 	findWithinOS := func() (found int) {

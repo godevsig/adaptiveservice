@@ -243,9 +243,9 @@ type service struct {
 	knownMsgTypes  map[reflect.Type]struct{}
 	s              *Server
 	scope          Scope
-	fnOnNewStream  func(Context)             // called on new stream accepted
-	fnOnConnect    func(Netconn) (stop bool) // called on new connection established
-	fnOnDisconnect func(Netconn)             // called on connection disconnected
+	fnOnNewStream  func(Context)                 // called on new stream accepted
+	fnOnConnect    func(Netconn) (takeOver bool) // called on new connection established
+	fnOnDisconnect func(Netconn)                 // called on connection disconnected
 }
 
 func (svc *service) canHandle(msg interface{}) bool {
