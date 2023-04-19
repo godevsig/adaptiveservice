@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"reflect"
@@ -428,6 +429,9 @@ func (r *registryLAN) run() {
 			if err != nil {
 				if !os.IsTimeout(err) {
 					lg.Warnf("lan registry receive error: %v", err)
+				}
+				if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "use of closed network connection") {
+					return
 				}
 				continue
 			}
