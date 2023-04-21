@@ -495,8 +495,8 @@ func (r *registryLAN) run() {
 		case <-r.done:
 			f, err := os.Create("local_services.record")
 			if err == nil {
-				for name, port := range localServiceTable {
-					fmt.Fprintln(f, name, port)
+				for name, lsi := range localServiceTable {
+					fmt.Fprintln(f, name, lsi.port)
 				}
 				f.Close()
 			}
