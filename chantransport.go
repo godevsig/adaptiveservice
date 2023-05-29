@@ -289,7 +289,8 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
 		return ErrRecvTimeout
 	case msg := <-msgChan:
 		if err, ok := msg.(error); ok { // message handler returned error
-			if err == io.EOF {
+			if fmt.Sprintf("%#v", err) == fmt.Sprintf("%#v", io.EOF) {
+				err = io.EOF
 				cs.msgChan = nil
 			}
 			return err
