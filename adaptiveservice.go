@@ -85,6 +85,8 @@ const (
 	OK = 0
 )
 
+const asTmpDir = "/tmp/adaptiveservice"
+
 var (
 	// ErrServiceNotReachable is an error where the service exists
 	// but somehow can not be reached, e.g. the service is behind NAT.

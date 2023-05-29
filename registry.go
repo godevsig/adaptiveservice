@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -403,7 +404,8 @@ func (r *registryLAN) run() {
 	// "publisher_service": {time.Time, {"providerID1":"192.168.0.11:12345", "providerID2":"192.168.0.26:33556"}}
 	serviceCache := make(map[string]*providers)
 
-	f, err := os.Open("local_services.record")
+	localRecord := filepath.Join(asTmpDir, "local_services.record")
+	f, err := os.Open(localRecord)
 	if err == nil {
 		t := time.Now()
 		for {
@@ -415,7 +417,7 @@ func (r *registryLAN) run() {
 			localServiceTable[name] = &localSvcInfo{t, port}
 		}
 		f.Close()
-		os.Remove("local_services.record")
+		os.Remove(localRecord)
 	}
 
 	readConn := func() {
@@ -493,7 +495,7 @@ func (r *registryLAN) run() {
 	for {
 		select {
 		case <-r.done:
-			f, err := os.Create("local_services.record")
+			f, err := os.Create(localRecord)
 			if err == nil {
 				for name, lsi := range localServiceTable {
 					fmt.Fprintln(f, name, lsi.port)
@@ -803,6 +805,7 @@ func init() {
 }
 
 func (s *Server) registryCheckSaver(rr *rootRegistry) {
+	s.lg.Infof("root registry checksaver running")
 	for {
 		time.Sleep(time.Minute)
 
@@ -822,7 +825,10 @@ func (s *Server) registryCheckSaver(rr *rootRegistry) {
 			return false
 		})
 
-		f, err := os.Create("services.record.updating")
+		servicesRecord := filepath.Join(asTmpDir, "services.record")
+		updatingFile := servicesRecord + ".updating"
+
+		f, err := os.Create(updatingFile)
 		if err != nil {
 			s.lg.Errorf("root registry: record file not created: %v", err)
 			continue
@@ -831,7 +837,7 @@ func (s *Server) registryCheckSaver(rr *rootRegistry) {
 			fmt.Fprintf(f, "%s %s %s %s\n", si.Publisher, si.Service, si.ProviderID, si.Addr)
 		}
 		f.Close()
-		os.Rename("services.record.updating", "services.record")
+		os.Rename(updatingFile, servicesRecord)
 	}
 }
 
@@ -851,7 +857,8 @@ func (s *Server) startRootRegistry(port string) error {
 	rr := &rootRegistry{
 		serviceMap: make(map[string]*providerMap),
 	}
-	f, err := os.Open("services.record")
+	servicesRecord := filepath.Join(asTmpDir, "services.record")
+	f, err := os.Open(servicesRecord)
 	if err == nil {
 		for {
 			var publisher, service, providerID, addr string
@@ -885,4 +892,8 @@ func (s *Server) startRootRegistry(port string) error {
 
 	go s.registryCheckSaver(rr)
 	return nil
+}
+
+func init() {
+	os.MkdirAll(asTmpDir, 0755)
 }
