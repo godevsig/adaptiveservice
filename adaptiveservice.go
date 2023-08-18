@@ -302,6 +302,17 @@ func RegisterType(i interface{}) {
 	gotiny.RegisterName(rt.String(), rt)
 }
 
+// RegisterTypeNoPanic is like RegisterType but recovers from panic.
+func RegisterTypeNoPanic(i interface{}) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("%v", p)
+		}
+	}()
+	RegisterType(i)
+	return
+}
+
 // test if pattern matches str
 //   "*" matches all
 //  "*bar*" matches bar, foobar, or foobarabc
