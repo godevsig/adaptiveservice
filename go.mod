@@ -1,9 +1,9 @@
 module github.com/godevsig/adaptiveservice
 
-go 1.16
+go 1.18
 
 require (
-	github.com/barkimedes/go-deepcopy v0.0.0-20200817023428-a044a1957ca4
+	github.com/barkimedes/go-deepcopy v0.0.0-20220514131651-17c30cfc62df
 	github.com/niubaoshu/gotiny v0.0.3
 )
 
