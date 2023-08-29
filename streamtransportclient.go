@@ -147,6 +147,14 @@ func (cs *streamClientStream) GetNetconn() Netconn {
 	return cs.conn.netconn
 }
 
+func (cs *streamClientStream) Close() {
+	lg := cs.conn.owner.lg
+	err := cs.Send(streamCloseMsg{})
+	if err != nil {
+		lg.Errorf("closing stream transport stream error: %v", err)
+	}
+}
+
 func (cs *streamClientStream) Send(msg interface{}) error {
 	if cs.msgChan == nil || cs.conn.closed == nil {
 		return io.EOF

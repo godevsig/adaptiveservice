@@ -157,6 +157,8 @@ func (ss *streamServerStream) GetNetconn() Netconn {
 	return ss.netconn
 }
 
+func (ss *streamServerStream) Close() {}
+
 func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	buf := net.Buffers{}
 	mainCopy := false
@@ -394,6 +396,12 @@ func (st *streamTransport) receiver() {
 					lg.Debugf("%s %s on new stream", st.svc.publisherName, st.svc.serviceName)
 					st.svc.fnOnNewStream(ss)
 				}
+			}
+
+			if _, ok := tm.msg.(streamCloseMsg); ok { // check if stream close was sent
+				delete(ssMap, tm.chanID)
+				lg.Infof("stream %v closed", tm.chanID)
+				continue
 			}
 
 			if decErr != nil {

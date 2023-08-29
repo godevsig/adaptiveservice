@@ -22,6 +22,8 @@ func Run(cmd string, opts []as.Option) {
 
 	if cmd == "timeout" {
 		stream := conn.NewStream()
+		defer stream.Close()
+
 		fmt.Println("No timeout by default")
 		if err := stream.SendRecv(echo.MessageTimeout{}, nil); err != nil {
 			fmt.Println(err)
@@ -64,6 +66,8 @@ func Run(cmd string, opts []as.Option) {
 	if cmd == "whoelse" {
 		go func() {
 			eventStream := conn.NewStream()
+			defer eventStream.Close()
+
 			if err := eventStream.Send(echo.SubWhoElseEvent{}); err != nil {
 				fmt.Println(err)
 				return
@@ -124,6 +128,8 @@ func Run(cmd string, opts []as.Option) {
 				go func(i int) {
 					defer wg.Done()
 					stream := conn.NewStream()
+					defer stream.Close()
+
 					req := echo.MessageRequest{
 						Msg: "ni hao",
 						Num: 100 * int32(i),

@@ -53,7 +53,12 @@ type Stream interface {
 	// A negative or zero duration causes Recv() waits forever.
 	// Default is 0.
 	SetRecvTimeout(d time.Duration)
+	// Close closes the stream
+	Close()
 }
+
+// streamCloseMsg is a special message sent by client to close the stream.
+type streamCloseMsg struct{}
 
 // ContextStream is a stream with an associated context.
 // Messages from the same stream have the same context, their handlers
@@ -77,4 +82,8 @@ func (to *timeouter) timeoutChan() (timeoutChan chan struct{}) {
 		time.AfterFunc(to.d, func() { timeoutChan <- struct{}{} })
 	}
 	return
+}
+
+func init() {
+	RegisterType(streamCloseMsg{})
 }

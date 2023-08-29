@@ -64,6 +64,14 @@ func (cs *chanClientStream) GetNetconn() Netconn {
 	return cc
 }
 
+func (cs *chanClientStream) Close() {
+	lg := cs.conn.cct.owner.lg
+	err := cs.Send(streamCloseMsg{})
+	if err != nil {
+		lg.Errorf("closing chan transport stream error: %v", err)
+	}
+}
+
 func (cs *chanClientStream) Send(msg interface{}) error {
 	if cs.msgChan == nil {
 		return io.EOF

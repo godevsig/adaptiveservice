@@ -55,6 +55,8 @@ func (ss *chanServerStream) GetNetconn() Netconn {
 	return ss.netconn
 }
 
+func (ss *chanServerStream) Close() {}
+
 func (ss *chanServerStream) Send(msg interface{}) error {
 	if *ss.connClose == nil {
 		return io.EOF
@@ -188,6 +190,13 @@ func (ct *chanTransport) receiver() {
 								ct.svc.fnOnNewStream(ss)
 							}
 						}
+
+						if _, ok := tm.msg.(streamCloseMsg); ok { // check if stream close was sent
+							delete(ssMap, tm.srcChan)
+							lg.Infof("stream %v closed", tm.srcChan)
+							continue
+						}
+
 						if ct.svc.canHandle(tm.msg) {
 							mm := &metaKnownMsg{
 								stream: ss,
