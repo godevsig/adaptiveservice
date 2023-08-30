@@ -186,14 +186,17 @@ func (ct *chanTransport) receiver() {
 							}
 							ssMap[tm.srcChan] = ss
 							if ct.svc.fnOnNewStream != nil {
-								lg.Debugf("%s %s on new stream", ct.svc.publisherName, ct.svc.serviceName)
+								lg.Debugf("%s %s on new stream %v", ct.svc.publisherName, ct.svc.serviceName, tm.srcChan)
 								ct.svc.fnOnNewStream(ss)
 							}
 						}
 
 						if _, ok := tm.msg.(streamCloseMsg); ok { // check if stream close was sent
+							if ct.svc.fnOnStreamClose != nil {
+								ct.svc.fnOnStreamClose(ss)
+								lg.Debugf("%s %s on stream %v close", ct.svc.publisherName, ct.svc.serviceName, tm.srcChan)
+							}
 							delete(ssMap, tm.srcChan)
-							lg.Infof("stream %v closed", tm.srcChan)
 							continue
 						}
 

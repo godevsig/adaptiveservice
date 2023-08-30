@@ -110,7 +110,7 @@ func Run(cmd string, opts []as.Option) {
 	}
 
 	var wg sync.WaitGroup
-	for j := 0; j < 1025; j++ {
+	for j := 0; j < 6; j++ {
 		c := as.NewClient(opts...).SetDeepCopy()
 		conn := <-c.Discover(echo.Publisher, echo.ServiceEcho)
 		if conn == nil {

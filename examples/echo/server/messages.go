@@ -116,9 +116,14 @@ func (mgr *statMgr) onDisconnect(netconn as.Netconn) {
 }
 
 func (mgr *statMgr) onNewStream(ctx as.Context) {
-	fmt.Println("on new stream")
 	sessionName := fmt.Sprintf("yours echo.v1.0 from %d", atomic.AddInt32(&mgr.sessionNum, 1))
+	fmt.Println("on new stream", sessionName)
 	ctx.SetContext(&sessionInfo{sessionName, mgr})
+}
+
+func (mgr *statMgr) onStreamClose(ctx as.Context) {
+	si := ctx.GetContext().(*sessionInfo)
+	fmt.Printf("on stream %v close\n", si.sessionName)
 }
 
 var echoKnownMsgs = []as.KnownMessage{

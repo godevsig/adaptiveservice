@@ -33,6 +33,7 @@ func Run(opts []as.Option) {
 	if err := s.Publish(ServiceEcho,
 		echoKnownMsgs,
 		as.OnNewStreamFunc(mgr.onNewStream),
+		as.OnStreamCloseFunc(mgr.onStreamClose),
 		as.OnConnectFunc(mgr.onConnect),
 		as.OnDisconnectFunc(mgr.onDisconnect),
 	); err != nil {

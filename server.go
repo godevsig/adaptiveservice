@@ -237,15 +237,16 @@ func (s *Server) init() error {
 }
 
 type service struct {
-	publisherName  string
-	serviceName    string
-	providerID     string
-	knownMsgTypes  map[reflect.Type]struct{}
-	s              *Server
-	scope          Scope
-	fnOnNewStream  func(Context)                 // called on new stream accepted
-	fnOnConnect    func(Netconn) (takeOver bool) // called on new connection established
-	fnOnDisconnect func(Netconn)                 // called on connection disconnected
+	publisherName   string
+	serviceName     string
+	providerID      string
+	knownMsgTypes   map[reflect.Type]struct{}
+	s               *Server
+	scope           Scope
+	fnOnNewStream   func(Context)                 // called on new stream accepted
+	fnOnStreamClose func(Context)                 // called on stream closed
+	fnOnConnect     func(Netconn) (takeOver bool) // called on new connection established
+	fnOnDisconnect  func(Netconn)                 // called on connection disconnected
 }
 
 func (svc *service) canHandle(msg interface{}) bool {

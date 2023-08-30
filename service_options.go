@@ -11,6 +11,14 @@ func OnNewStreamFunc(fn func(Context)) ServiceOption {
 	}
 }
 
+// OnStreamCloseFunc sets a function which is called when the stream
+// is being closed.
+func OnStreamCloseFunc(fn func(Context)) ServiceOption {
+	return func(svc *service) {
+		svc.fnOnStreamClose = fn
+	}
+}
+
 // OnConnectFunc sets a function which is called when new
 // incoming connection is established.
 // Further message dispaching on this connection will stop
