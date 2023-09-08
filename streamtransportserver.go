@@ -227,6 +227,7 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
 		}
+		getRoutineLocal().tracingID = mm.tracingID
 
 		if err, ok := msg.(error); ok {
 			return err
