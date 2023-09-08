@@ -40,3 +40,14 @@ type LowPriorityMessage interface {
 	KnownMessage
 	IsLowPriority()
 }
+
+type metaMsg struct {
+	msg       any
+	tracingID uuidptr
+}
+
+type metaKnownMsg struct {
+	stream    ContextStream
+	msg       KnownMessage
+	tracingID uuidptr
+}

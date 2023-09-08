@@ -6,11 +6,6 @@ import (
 	"time"
 )
 
-type metaKnownMsg struct {
-	stream ContextStream
-	msg    KnownMessage
-}
-
 type msgQ struct {
 	sync.Mutex
 	wp                *workerPool
@@ -107,6 +102,13 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			return
 		case mm := <-mq.getEgressChan():
 			st.working()
+			if mm.tracingID != nil {
+				err := traceMsg(mm.msg, mm.tracingID, "server handler", mm.stream.GetNetconn())
+				if err != nil {
+					mq.lg.Warnf("message tracing on server handler error: %v", err)
+				}
+			}
+			getRoutineLocal().tracingID = mm.tracingID
 			reply := mm.msg.Handle(mm.stream)
 			//mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
 			if reply != nil {

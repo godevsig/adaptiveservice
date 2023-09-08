@@ -17,7 +17,7 @@ import (
 
 type streamClientStream struct {
 	conn        *streamConnection
-	msgChan     chan interface{}
+	msgChan     chan *metaMsg
 	encMainCopy int32
 	enc         *gotiny.Encoder
 	timeouter
@@ -123,8 +123,8 @@ func (conn *streamConnection) receiver() {
 						lg.Errorf("broken stream chan: %v", err)
 					}
 				}()
-				msgChan := *(*chan interface{})(unsafe.Pointer(uintptr(tm.chanID)))
-				msgChan <- tm.msg
+				msgChan := *(*chan *metaMsg)(unsafe.Pointer(uintptr(tm.chanID)))
+				msgChan <- &metaMsg{tm.msg, tm.tracingID}
 			}()
 		} else {
 			panic("msg channel not specified")
@@ -135,7 +135,7 @@ func (conn *streamConnection) receiver() {
 func (conn *streamConnection) NewStream() Stream {
 	return &streamClientStream{
 		conn:    conn,
-		msgChan: make(chan interface{}, conn.owner.qsize),
+		msgChan: make(chan *metaMsg, conn.owner.qsize),
 		enc:     gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 	}
 }
@@ -159,11 +159,19 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	if cs.msgChan == nil || cs.conn.closed == nil {
 		return io.EOF
 	}
+	lg := cs.conn.owner.lg
+
+	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		err := traceMsg(msg, tracingID, "client send", cs.conn.netconn)
+		if err != nil {
+			lg.Warnf("message tracing on client send error: %v", err)
+		}
+	}
 
 	cid := uint64(uintptr(unsafe.Pointer(&cs.msgChan)))
-	tm := streamTransportMsg{chanID: cid, msg: msg}
+	tm := streamTransportMsg{chanID: cid, msg: msg, tracingID: tracingID}
 
-	lg := cs.conn.owner.lg
 	buf := net.Buffers{}
 	mainCopy := false
 	if atomic.CompareAndSwapInt32(&cs.encMainCopy, 0, 1) {
@@ -203,12 +211,21 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 		panic("not a pointer or nil pointer")
 	}
 
+	lg := cs.conn.owner.lg
 	select {
 	case <-connClosed:
 		return ErrConnReset
 	case <-cs.timeouter.timeoutChan():
 		return ErrRecvTimeout
-	case msg := <-cs.msgChan:
+	case mm := <-cs.msgChan:
+		msg := mm.msg
+		if mm.tracingID != nil {
+			err := traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn)
+			if err != nil {
+				lg.Warnf("message tracing on client recv error: %v", err)
+			}
+		}
+
 		if err, ok := msg.(error); ok { // message handler returned error
 			if fmt.Sprintf("%#v", err) == fmt.Sprintf("%#v", io.EOF) {
 				err = io.EOF

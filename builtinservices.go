@@ -20,6 +20,8 @@ const (
 	SrvServiceLister = "serviceLister"
 	// SrvIPObserver : service IPObserver
 	SrvIPObserver = "IPObserver"
+	// SrvMessageTracing : service messageTracing
+	SrvMessageTracing = "messageTracing"
 )
 
 var sharedInfo struct {

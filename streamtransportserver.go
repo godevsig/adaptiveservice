@@ -136,8 +136,9 @@ func (st *streamTransport) close() {
 }
 
 type streamTransportMsg struct {
-	chanID uint64 // client stream channel ID
-	msg    interface{}
+	chanID    uint64 // client stream channel ID
+	msg       interface{}
+	tracingID uuidptr
 }
 
 type streamServerStream struct {
@@ -146,8 +147,8 @@ type streamServerStream struct {
 	lg          Logger
 	netconn     net.Conn
 	connClose   *chan struct{}
-	privateChan chan interface{} // dedicated to the client
-	chanID      uint64           // client stream channel ID, taken from transport msg
+	privateChan chan *metaMsg // dedicated to the client
+	chanID      uint64        // client stream channel ID, taken from transport msg
 	enc         *gotiny.Encoder
 	encMainCopy int32
 	timeouter
@@ -192,7 +193,14 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 	if *ss.connClose == nil {
 		return io.EOF
 	}
-	tm := streamTransportMsg{chanID: ss.chanID, msg: msg}
+	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		err := traceMsg(msg, tracingID, "server send", ss.netconn)
+		if err != nil {
+			ss.lg.Warnf("message tracing on server send error: %v", err)
+		}
+	}
+	tm := streamTransportMsg{chanID: ss.chanID, msg: msg, tracingID: tracingID}
 	return ss.send(&tm)
 }
 
@@ -211,7 +219,15 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 		return io.EOF
 	case <-ss.timeouter.timeoutChan():
 		return ErrRecvTimeout
-	case msg := <-ss.privateChan:
+	case mm := <-ss.privateChan:
+		msg := mm.msg
+		if mm.tracingID != nil {
+			err := traceMsg(msg, mm.tracingID, "server recv", ss.netconn)
+			if err != nil {
+				ss.lg.Warnf("message tracing on server recv error: %v", err)
+			}
+		}
+
 		if err, ok := msg.(error); ok {
 			return err
 		}
@@ -387,7 +403,7 @@ func (st *streamTransport) receiver() {
 					lg:          lg,
 					netconn:     netconn,
 					connClose:   &connClose,
-					privateChan: make(chan interface{}, st.svc.s.qsize),
+					privateChan: make(chan *metaMsg, st.svc.s.qsize),
 					chanID:      tm.chanID,
 					enc:         gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 				}
@@ -414,14 +430,17 @@ func (st *streamTransport) receiver() {
 				continue
 			}
 
-			if st.svc.canHandle(tm.msg) {
+			msg := tm.msg
+			tracingID := tm.tracingID
+			if st.svc.canHandle(msg) {
 				mm := &metaKnownMsg{
-					stream: ss,
-					msg:    tm.msg.(KnownMessage),
+					stream:    ss,
+					msg:       msg.(KnownMessage),
+					tracingID: tracingID,
 				}
 				mq.putMetaMsg(mm)
 			} else {
-				ss.privateChan <- tm.msg
+				ss.privateChan <- &metaMsg{msg, tracingID}
 			}
 		}
 	}
