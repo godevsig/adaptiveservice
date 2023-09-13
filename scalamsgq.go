@@ -1,6 +1,7 @@
 package adaptiveservice
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -103,7 +104,8 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 		case mm := <-mq.getEgressChan():
 			st.working()
 			if mm.tracingID != nil {
-				err := traceMsg(mm.msg, mm.tracingID, "server handler", mm.stream.GetNetconn())
+				tag := fmt.Sprintf("%s/%s@%s handler", mm.svcInfo.publisherName, mm.svcInfo.serviceName, mm.svcInfo.providerID)
+				err := traceMsg(mm.msg, mm.tracingID, tag, mm.stream.GetNetconn())
 				if err != nil {
 					mq.lg.Warnf("message tracing on server handler error: %v", err)
 				}

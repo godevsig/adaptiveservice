@@ -144,6 +144,7 @@ type streamTransportMsg struct {
 type streamServerStream struct {
 	Context
 	mtx         *sync.Mutex
+	svcInfo     *serviceInfo
 	lg          Logger
 	netconn     net.Conn
 	connClose   *chan struct{}
@@ -195,7 +196,8 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 	}
 	tracingID := getTracingID(msg)
 	if tracingID != nil {
-		err := traceMsg(msg, tracingID, "server send", ss.netconn)
+		tag := fmt.Sprintf("%s/%s@%s send", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
+		err := traceMsg(msg, tracingID, tag, ss.netconn)
 		if err != nil {
 			ss.lg.Warnf("message tracing on server send error: %v", err)
 		}
@@ -222,7 +224,8 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 	case mm := <-ss.privateChan:
 		msg := mm.msg
 		if mm.tracingID != nil {
-			err := traceMsg(msg, mm.tracingID, "server recv", ss.netconn)
+			tag := fmt.Sprintf("%s/%s@%s recv", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
+			err := traceMsg(msg, mm.tracingID, tag, ss.netconn)
 			if err != nil {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
@@ -295,17 +298,19 @@ func (st *streamTransport) reverseReceiver() {
 }
 
 func (st *streamTransport) receiver() {
-	lg := st.svc.s.lg
-	mq := st.svc.s.mq
+	svc := st.svc
 	lnr := st.lnr
+	lg := svc.s.lg
+	mq := svc.s.mq
+	svcInfo := &serviceInfo{svc.providerID, svc.publisherName, svc.serviceName}
 
 	go func() {
-		rootRegistryIP, _, _ := net.SplitHostPort(st.svc.s.registryAddr)
+		rootRegistryIP, _, _ := net.SplitHostPort(svc.s.registryAddr)
 		pinged := false
 		if lnr.Addr().Network() == "unix" {
 			pinged = true
 		}
-		if st.svc.publisherName == BuiltinPublisher && st.svc.serviceName == "rootRegistry" {
+		if svc.publisherName == BuiltinPublisher && svc.serviceName == "rootRegistry" {
 			pinged = true
 		}
 		for {
@@ -332,21 +337,21 @@ func (st *streamTransport) receiver() {
 	}()
 
 	handleConn := func(netconn net.Conn) {
-		lg.Debugf("%s %s new stream connection from: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
-		if st.svc.fnOnConnect != nil {
-			lg.Debugf("%s %s on connect", st.svc.publisherName, st.svc.serviceName)
-			if st.svc.fnOnConnect(netconn) {
+		lg.Debugf("%s %s new stream connection from: %s", svc.publisherName, svc.serviceName, netconn.RemoteAddr().String())
+		if svc.fnOnConnect != nil {
+			lg.Debugf("%s %s on connect", svc.publisherName, svc.serviceName)
+			if svc.fnOnConnect(netconn) {
 				return
 			}
 		}
 
 		connClose := make(chan struct{})
 		defer func() {
-			if st.svc.fnOnDisconnect != nil {
-				lg.Debugf("%s %s on disconnect", st.svc.publisherName, st.svc.serviceName)
-				st.svc.fnOnDisconnect(netconn)
+			if svc.fnOnDisconnect != nil {
+				lg.Debugf("%s %s on disconnect", svc.publisherName, svc.serviceName)
+				svc.fnOnDisconnect(netconn)
 			}
-			lg.Debugf("%s %s stream connection disconnected: %s", st.svc.publisherName, st.svc.serviceName, netconn.RemoteAddr().String())
+			lg.Debugf("%s %s stream connection disconnected: %s", svc.publisherName, svc.serviceName, netconn.RemoteAddr().String())
 			close(connClose)
 			connClose = nil
 			netconn.Close()
@@ -401,24 +406,25 @@ func (st *streamTransport) receiver() {
 				ss = &streamServerStream{
 					Context:     &contextImpl{},
 					mtx:         &mtx,
+					svcInfo:     svcInfo,
 					lg:          lg,
 					netconn:     netconn,
 					connClose:   &connClose,
-					privateChan: make(chan *metaMsg, st.svc.s.qsize),
+					privateChan: make(chan *metaMsg, svc.s.qsize),
 					chanID:      tm.chanID,
 					enc:         gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 				}
 				ssMap[tm.chanID] = ss
-				if st.svc.fnOnNewStream != nil {
-					lg.Debugf("%s %s on new stream %v", st.svc.publisherName, st.svc.serviceName, tm.chanID)
-					st.svc.fnOnNewStream(ss)
+				if svc.fnOnNewStream != nil {
+					lg.Debugf("%s %s on new stream %v", svc.publisherName, svc.serviceName, tm.chanID)
+					svc.fnOnNewStream(ss)
 				}
 			}
 
 			if _, ok := tm.msg.(streamCloseMsg); ok { // check if stream close was sent
-				if st.svc.fnOnStreamClose != nil {
-					st.svc.fnOnStreamClose(ss)
-					lg.Debugf("%s %s on stream %v close", st.svc.publisherName, st.svc.serviceName, tm.chanID)
+				if svc.fnOnStreamClose != nil {
+					svc.fnOnStreamClose(ss)
+					lg.Debugf("%s %s on stream %v close", svc.publisherName, svc.serviceName, tm.chanID)
 				}
 				delete(ssMap, tm.chanID)
 				continue
@@ -433,11 +439,12 @@ func (st *streamTransport) receiver() {
 
 			msg := tm.msg
 			tracingID := tm.tracingID
-			if st.svc.canHandle(msg) {
+			if svc.canHandle(msg) {
 				mm := &metaKnownMsg{
 					stream:    ss,
 					msg:       msg.(KnownMessage),
 					tracingID: tracingID,
+					svcInfo:   svcInfo,
 				}
 				mq.putMetaMsg(mm)
 			} else {

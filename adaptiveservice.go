@@ -63,6 +63,8 @@ import (
 type Scope uint16
 
 const (
+	// BuiltinPublisher name
+	BuiltinPublisher = "builtin"
 	// ScopeProcess is a scope where publishing and discovering services
 	// only happen in same process.
 	ScopeProcess Scope = 1 << iota
@@ -85,7 +87,9 @@ const (
 	OK = 0
 )
 
-const asTmpDir = "/tmp/adaptiveservice"
+const (
+	asTmpDir = "/tmp/adaptiveservice"
+)
 
 var (
 	// ErrServiceNotReachable is an error where the service exists

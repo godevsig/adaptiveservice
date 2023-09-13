@@ -50,4 +50,11 @@ type metaKnownMsg struct {
 	stream    ContextStream
 	msg       KnownMessage
 	tracingID uuidptr
+	svcInfo   *serviceInfo
+}
+
+type serviceInfo struct {
+	providerID    string
+	publisherName string
+	serviceName   string
 }

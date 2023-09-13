@@ -84,3 +84,10 @@ func (s *Server) EnableIPObserver() *Server {
 	s.ipObserver = true
 	return s
 }
+
+// EnableMessageTracer enables message tracing service which helps to
+// collect local traced messages.
+func (s *Server) EnableMessageTracer() *Server {
+	s.msgTracer = true
+	return s
+}

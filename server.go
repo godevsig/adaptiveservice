@@ -21,6 +21,7 @@ type Server struct {
 	autoReverseProxy bool
 	serviceLister    bool
 	ipObserver       bool
+	msgTracer        bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
 	residentWorkers  int
@@ -232,6 +233,14 @@ func (s *Server) init() error {
 		}
 		s.lg.Infof("IP observer started")
 	}
+
+	if s.msgTracer {
+		if err := s.publishMessageTracingService(); err != nil {
+			return err
+		}
+		s.lg.Infof("message tracer started")
+	}
+
 	s.lg.Debugf("server initialized")
 	return nil
 }
