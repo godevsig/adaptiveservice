@@ -41,7 +41,7 @@ func newMsgQ(residentWorkers, qSizePerCore, qWeight int, lg Logger) *msgQ {
 		go mq.autoScaler()
 	}
 
-	lg.Infof("msgq created with qSize %v", qSize)
+	lg.Infof("msgq created with qSize %v, resident workers %d", qSize, mq.residentWorkers)
 	return mq
 }
 
@@ -103,6 +103,7 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			return
 		case mm := <-mq.getEgressChan():
 			st.working()
+			mq.lg.Debugf("worker handling message: <%#v>", mm.msg)
 			if mm.tracingID != nil {
 				tag := fmt.Sprintf("%s/%s@%s handler", mm.svcInfo.publisherName, mm.svcInfo.serviceName, mm.svcInfo.providerID)
 				err := traceMsg(mm.msg, mm.tracingID, tag, mm.stream.GetNetconn())
@@ -112,7 +113,7 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			}
 			getRoutineLocal().tracingID = mm.tracingID
 			reply := mm.msg.Handle(mm.stream)
-			//mq.lg.Debugf("message: %#v handled, reply: %#v", mm.msg, reply)
+			mq.lg.Debugf("worker handled, reply: <%#v>", reply)
 			if reply != nil {
 				mm.stream.Send(reply)
 			}

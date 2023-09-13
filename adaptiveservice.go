@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"github.com/niubaoshu/gotiny"
+	"github.com/timandy/routine"
 )
 
 // Scope is publishing and discovering scope
@@ -65,6 +66,15 @@ type Scope uint16
 const (
 	// BuiltinPublisher name
 	BuiltinPublisher = "builtin"
+	// OK can be returned by known messages as reply to indicate
+	// everything is OK. Client should use type int to receive it.
+	OK           = 0
+	asTmpDir     = "/tmp/adaptiveservice"
+	timeNano     = "15:04:05.000000"
+	dateTimeNano = "2006-01-02 15:04:05.000000"
+)
+
+const (
 	// ScopeProcess is a scope where publishing and discovering services
 	// only happen in same process.
 	ScopeProcess Scope = 1 << iota
@@ -81,14 +91,6 @@ const (
 	ScopeNetwork = ScopeLAN | ScopeWAN
 	// ScopeAll includes all scopes.
 	ScopeAll = ScopeProcess | ScopeOS | ScopeLAN | ScopeWAN
-
-	// OK can be returned by known messages as reply to indicate
-	// everything is OK. Client should use type int to receive it.
-	OK = 0
-)
-
-const (
-	asTmpDir = "/tmp/adaptiveservice"
 )
 
 var (
@@ -183,22 +185,26 @@ type LoggerAll struct{}
 
 // Debugf is Debugf
 func (LoggerAll) Debugf(format string, args ...interface{}) {
-	fmt.Printf("[AS DEBUG] "+format+"\n", args...)
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	fmt.Printf(h+"[AS DEBUG] "+format+"\n", args...)
 }
 
 // Infof is Infof
 func (LoggerAll) Infof(format string, args ...interface{}) {
-	fmt.Printf("[AS INFO] "+format+"\n", args...)
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	fmt.Printf(h+"[AS INFO] "+format+"\n", args...)
 }
 
 // Warnf is Warnf
 func (LoggerAll) Warnf(format string, args ...interface{}) {
-	fmt.Printf("[AS WARN] "+format+"\n", args...)
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	fmt.Printf(h+"[AS WARN] "+format+"\n", args...)
 }
 
 // Errorf is Errorf
 func (LoggerAll) Errorf(format string, args ...interface{}) {
-	fmt.Printf("[AS ERROR] "+format+"\n", args...)
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	fmt.Printf(h+"[AS ERROR] "+format+"\n", args...)
 }
 
 type errorRecover interface {

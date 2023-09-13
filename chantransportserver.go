@@ -205,6 +205,7 @@ func (ct *chanTransport) receiver() {
 								stream: ss,
 								msg:    tm.msg.(KnownMessage),
 							}
+							lg.Debugf("chan enqueue message <%#v>", mm.msg)
 							mq.putMetaMsg(mm)
 						} else {
 							ss.privateChan <- tm.msg

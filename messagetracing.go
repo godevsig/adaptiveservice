@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/timandy/routine"
@@ -66,27 +67,30 @@ func ReadTracedMsg(token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	c := NewClient().SetDiscoverTimeout(0)
 	connChan := c.Discover(BuiltinPublisher, SrvMessageTracing, "*")
-	var allRecord [][]*record
+	var allRecord []*tracedMessageRecord
 	for conn := range connChan {
-		records := []*record{}
+		records := []*tracedMessageRecord{}
 		conn.SendRecv(&readTracedMsg{&uuid}, &records)
 		if len(records) != 0 {
-			allRecord = append(allRecord, records)
+			allRecord = append(allRecord, records...)
 		}
 		conn.Close()
 	}
 
 	sort.Slice(allRecord, func(i, j int) bool {
-		return allRecord[i][0].timeStamp.Before(allRecord[j][0].timeStamp)
+		return allRecord[i].timeStamp.Before(allRecord[j].timeStamp)
 	})
 
 	var sb strings.Builder
-	for _, records := range allRecord {
-		for _, rcd := range records {
-			fmt.Fprintf(&sb, "%v %s %s <%v>", rcd.timeStamp, rcd.msgRecord.tag, rcd.msgRecord.connInfo, rcd.msgRecord.msg)
-		}
+	for _, rcd := range allRecord {
+		fmt.Fprintf(&sb, "%v [%s] |%s| <%#v>\n",
+			rcd.timeStamp.Format(timeNano),
+			rcd.tag,
+			rcd.connInfo,
+			rcd.msg)
 	}
 	return sb.String(), nil
 }
@@ -119,16 +123,17 @@ func traceMsg(msg any, tracingID uuidptr, tag string, netconn Netconn) error {
 	defer conn.Close()
 
 	local := netconn.LocalAddr()
-	connInfo := fmt.Sprintf("%s: %s -- %s", local.Network(), local.String(), netconn.RemoteAddr().String())
-	tracedMsgRcd := tracedMessageRecord{
+	connInfo := fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), netconn.RemoteAddr().String())
+	tracedMsg := tracedMessageRecord{
+		time.Now(),
 		msg,
 		tracingID,
 		tag,
 		connInfo,
 	}
 	// one way send
-	if err := conn.Send(&tracedMsgRcd); err != nil {
-		return fmt.Errorf("record message %v error: %v", tracedMsgRcd, err)
+	if err := conn.Send(&tracedMsg); err != nil {
+		return fmt.Errorf("record message %v error: %v", tracedMsg, err)
 	}
 	return nil
 }

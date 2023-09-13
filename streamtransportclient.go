@@ -186,7 +186,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
-	lg.Debugf("stream client send: tm: %#v ==> size %d, buf %v <%s>", &tm, len(bufMsg), bufMsg, bufMsg)
+	lg.Debugf("stream client send: tm: %#v", &tm)
 	cs.conn.Lock()
 	defer func() {
 		if mainCopy {

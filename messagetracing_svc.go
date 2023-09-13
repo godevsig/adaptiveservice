@@ -13,31 +13,29 @@ const SrvMessageTracing = "messageTracing"
 
 type messageTracer struct {
 	sync.RWMutex
+	lg  Logger
 	cap int
 	lru *list.List // with element Value being *tracingSession
 	lut map[uuid.UUID]*list.Element
 }
 
-func newMessageTracer(cap int) *messageTracer {
+func newMessageTracer(cap int, lg Logger) *messageTracer {
 	return &messageTracer{
+		lg:  lg,
 		cap: cap,
 		lru: list.New(),
 		lut: make(map[uuid.UUID]*list.Element, cap),
 	}
 }
 
-type record struct {
-	timeStamp time.Time
-	msgRecord *tracedMessageRecord
-}
-
 type tracingSession struct {
 	sync.Mutex
 	tracingID uuidptr
-	records   []*record
+	records   []*tracedMessageRecord
 }
 
 type tracedMessageRecord struct {
+	timeStamp time.Time
 	msg       any
 	tracingID uuidptr
 	tag       string
@@ -46,7 +44,7 @@ type tracedMessageRecord struct {
 
 func (tmrcd *tracedMessageRecord) Handle(stream ContextStream) (reply any) {
 	mTracer := stream.GetContext().(*messageTracer)
-	newrcd := &record{time.Now(), tmrcd}
+	mTracer.lg.Debugf("tracedMessage handler: <%#v>", tmrcd)
 
 	mTracer.RLock()
 	elem, has := mTracer.lut[*tmrcd.tracingID]
@@ -55,14 +53,14 @@ func (tmrcd *tracedMessageRecord) Handle(stream ContextStream) (reply any) {
 	if has {
 		tSession := elem.Value.(*tracingSession)
 		tSession.Lock()
-		tSession.records = append(tSession.records, newrcd)
+		tSession.records = append(tSession.records, tmrcd)
 		tSession.Unlock()
 		mTracer.Lock()
 		mTracer.lru.MoveToFront(elem)
 		mTracer.Unlock()
 	} else {
-		records := make([]*record, 0, 32)
-		records = append(records, newrcd)
+		records := make([]*tracedMessageRecord, 0, 32)
+		records = append(records, tmrcd)
 		tSession := &tracingSession{tracingID: tmrcd.tracingID}
 		tSession.Lock()
 		tSession.records = records
@@ -81,7 +79,7 @@ func (tmrcd *tracedMessageRecord) Handle(stream ContextStream) (reply any) {
 	return nil
 }
 
-// reply with []*record
+// reply with []*tracedMessageRecord
 type readTracedMsg struct {
 	tracingID uuidptr
 }
@@ -92,9 +90,9 @@ func (rtmsg *readTracedMsg) Handle(stream ContextStream) (reply any) {
 	mTracer.RLock()
 	elem, has := mTracer.lut[*rtmsg.tracingID]
 	mTracer.RUnlock()
-	records := []*record{}
+	records := []*tracedMessageRecord{}
 	if has {
-		newRecords := make([]*record, 0, 32)
+		newRecords := make([]*tracedMessageRecord, 0, 32)
 		tSession := elem.Value.(*tracingSession)
 		tSession.Lock()
 		records = tSession.records
@@ -106,7 +104,7 @@ func (rtmsg *readTracedMsg) Handle(stream ContextStream) (reply any) {
 
 // publishMessageTracingService declares the message tracing service.
 func (s *Server) publishMessageTracingService() error {
-	mTracer := newMessageTracer(1024)
+	mTracer := newMessageTracer(1024, s.lg)
 	knownMsgs := []KnownMessage{(*tracedMessageRecord)(nil), (*readTracedMsg)(nil)}
 	return s.publish(s.scope, BuiltinPublisher, SrvMessageTracing,
 		knownMsgs,
@@ -118,4 +116,5 @@ func (s *Server) publishMessageTracingService() error {
 func init() {
 	RegisterType((*tracedMessageRecord)(nil))
 	RegisterType((*readTracedMsg)(nil))
+	RegisterType(([]*tracedMessageRecord)(nil))
 }

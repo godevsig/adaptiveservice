@@ -176,7 +176,7 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
-	ss.lg.Debugf("stream server send: tm: %#v ==> size %d, buf %v <%s>", tm, len(bufMsg), bufMsg, bufMsg)
+	ss.lg.Debugf("stream server send: tm: %#v", tm)
 	ss.mtx.Lock()
 	defer func() {
 		if mainCopy {
@@ -446,6 +446,7 @@ func (st *streamTransport) receiver() {
 					tracingID: tracingID,
 					svcInfo:   svcInfo,
 				}
+				lg.Debugf("stream enqueue message <%#v>", mm.msg)
 				mq.putMetaMsg(mm)
 			} else {
 				ss.privateChan <- &metaMsg{msg, tracingID}
