@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	as "github.com/godevsig/adaptiveservice"
-	"github.com/godevsig/adaptiveservice/examples/template/template"
+	"github.com/godevsig/adaptiveservice/examples/template"
 )
 
 func main() {
