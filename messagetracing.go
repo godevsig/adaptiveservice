@@ -37,9 +37,14 @@ var tracedMsgList = struct {
 //
 // Tracing is type based and always starts from the client side.
 // If a message to be sent by client matches the specified type, it is marked as traced message,
-// the special traced flag will be carried along the entire path across all the service nodes
-// that handle this message. All the messages with this traced flag are associated messages
-// and all associated messages will be recorded.
+// a special traced flag will be carried along the entire path across all the service nodes
+// that are involved to handle this message.
+//
+// When such messages with traced flag are being handled in
+// `Handle(ContextStream) any` on server side, all subsequent messages
+// under the same stream context are related messages. All related messages will also carry
+// the same traced flag and propagate the flag further to next hop and next next hop...
+// All related messages with traced flag will be recorded by built-in service "messageTracing".
 //  msg: any value with the same type of the message to be traced
 // A call to TraceMsgByType() only starts a one time tracing session.
 // The subsequent messages with the same type will not be traced unless another call
@@ -60,7 +65,7 @@ func TraceMsgByType(msg any) (token string, err error) {
 	return uuid.String(), nil
 }
 
-// ReadTracedMsg reads all the collected messages by the token returned
+// ReadTracedMsg reads all the collected traced messages by the token returned
 // by TraceMsgByType().
 func ReadTracedMsg(token string) (string, error) {
 	uuid, err := uuid.Parse(token)
