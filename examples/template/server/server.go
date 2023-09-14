@@ -18,7 +18,7 @@ func main() {
 		opts = append(opts, as.WithLogger(as.LoggerAll{}))
 	}
 
-	err := template.RunTemplateService(opts)
+	err := template.RunService(opts)
 	if err != nil {
 		fmt.Println(err)
 	}

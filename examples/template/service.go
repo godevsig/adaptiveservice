@@ -15,8 +15,8 @@ func (svc *service) onNewStream(ctx as.Context) {
 	ctx.SetContext(svc)
 }
 
-// RunTemplateService runs the service.
-func RunTemplateService(opts []as.Option) error {
+// RunService runs the service.
+func RunService(opts []as.Option) error {
 	s := as.NewServer(opts...).SetPublisher("example")
 
 	svc := &service{info: "Hello"}
