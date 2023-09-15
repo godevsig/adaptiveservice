@@ -91,7 +91,7 @@ func ReadTracedMsg(token string) (string, error) {
 
 	var sb strings.Builder
 	for _, rcd := range allRecord {
-		fmt.Fprintf(&sb, "%v [%s] |%s| <%#v>\n",
+		fmt.Fprintf(&sb, "%v [%s] |%s| <%s>\n",
 			rcd.timeStamp.Format(timeNano),
 			rcd.tag,
 			rcd.connInfo,
@@ -120,6 +120,9 @@ func getTracingID(msg any) uuidptr {
 }
 
 func traceMsg(msg any, tracingID uuidptr, tag string, netconn Netconn) error {
+	if _, ok := msg.(*tracedMessageRecord); ok {
+		return nil // do not trace *tracedMessageRecord itself
+	}
 	c := NewClient().SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, SrvMessageTracing)
 	if conn == nil {
@@ -131,7 +134,7 @@ func traceMsg(msg any, tracingID uuidptr, tag string, netconn Netconn) error {
 	connInfo := fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), netconn.RemoteAddr().String())
 	tracedMsg := tracedMessageRecord{
 		time.Now(),
-		msg,
+		fmt.Sprintf("%#v", msg),
 		tracingID,
 		tag,
 		connInfo,

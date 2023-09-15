@@ -36,7 +36,7 @@ type tracingSession struct {
 
 type tracedMessageRecord struct {
 	timeStamp time.Time
-	msg       any
+	msg       string
 	tracingID uuidptr
 	tag       string
 	connInfo  string
