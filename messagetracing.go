@@ -3,6 +3,7 @@ package adaptiveservice
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -90,12 +91,63 @@ func ReadTracedMsg(token string) (string, error) {
 	})
 
 	var sb strings.Builder
+	indent := 0
 	for _, rcd := range allRecord {
-		fmt.Fprintf(&sb, "%v [%s] |%s| <%s>\n",
+		if rcd.tag == "client recv" {
+			indent--
+		}
+		if indent < 0 {
+			indent = 0
+		}
+		fmt.Fprintf(&sb, "%v %s[%s] |%s| <%s>\n",
 			rcd.timeStamp.Format(timeNano),
+			strings.Repeat("\t", indent),
 			rcd.tag,
 			rcd.connInfo,
 			rcd.msg)
+		if rcd.tag == "client send" {
+			indent++
+		}
+	}
+
+	reEmptyStruct := regexp.MustCompile(`\{.*?\}`)
+	shortenMsg := func(msg string) string {
+		return reEmptyStruct.ReplaceAllString(msg, "") + "{}"
+	}
+
+	fmt.Fprintln(&sb, "\nSummary(paste below content to http://www.plantuml.com/plantuml):")
+	var svcs []string
+	for _, rcd := range allRecord {
+		fields := strings.Fields(rcd.tag)
+		if len(fields) != 2 {
+			continue
+		}
+
+		who := fields[0]
+		action := fields[1]
+		switch action {
+		case "send":
+			ln := len(svcs)
+			if ln != 0 {
+				if who == "client" {
+					who = svcs[ln-1]
+				} else {
+					svcs = svcs[:ln-1]
+				}
+			}
+			fmt.Fprintf(&sb, "\"%s\" -> ", who)
+		case "handler":
+			svcs = append(svcs, who)
+			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeNano), shortenMsg(rcd.msg))
+		case "recv":
+			ln := len(svcs)
+			if ln != 0 {
+				if who == "client" {
+					who = svcs[ln-1]
+				}
+			}
+			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeNano), shortenMsg(rcd.msg))
+		}
 	}
 	return sb.String(), nil
 }
