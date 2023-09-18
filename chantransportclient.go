@@ -11,7 +11,7 @@ import (
 
 type chanClientStream struct {
 	conn    *chanConnection
-	msgChan chan interface{}
+	msgChan chan *metaMsg
 	timeouter
 }
 
@@ -47,7 +47,7 @@ func (cct *clientChanTransport) newConnection() *chanConnection {
 func (conn *chanConnection) NewStream() Stream {
 	cs := &chanClientStream{
 		conn:    conn,
-		msgChan: make(chan interface{}, cap(conn.serverChan)),
+		msgChan: make(chan *metaMsg, cap(conn.serverChan)),
 	}
 	return cs
 }
@@ -79,7 +79,14 @@ func (cs *chanClientStream) Send(msg interface{}) error {
 	if cs.conn.cct.owner.deepCopy {
 		msg = deepcopy.MustAnything(msg)
 	}
-	cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.msgChan, msg: msg}
+	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		err := traceMsg(msg, tracingID, "client send", cs.GetNetconn())
+		if err != nil {
+			cs.conn.cct.owner.lg.Warnf("message tracing on client send error: %v", err)
+		}
+	}
+	cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.msgChan, msg: msg, tracingID: tracingID}
 	return nil
 }
 
@@ -96,7 +103,15 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
 	select {
 	case <-cs.timeouter.timeoutChan():
 		return ErrRecvTimeout
-	case msg := <-msgChan:
+	case mm := <-msgChan:
+		msg := mm.msg
+		if mm.tracingID != nil {
+			err := traceMsg(msg, mm.tracingID, "client recv", cs.GetNetconn())
+			if err != nil {
+				cs.conn.cct.owner.lg.Warnf("message tracing on client recv error: %v", err)
+			}
+		}
+
 		if err, ok := msg.(error); ok { // message handler returned error
 			if fmt.Sprintf("%#v", err) == fmt.Sprintf("%#v", io.EOF) {
 				err = io.EOF

@@ -9,8 +9,9 @@ import (
 )
 
 type chanTransportMsg struct {
-	srcChan chan interface{}
-	msg     interface{}
+	srcChan   chan *metaMsg
+	msg       interface{}
+	tracingID uuidptr
 }
 
 type handshake struct {
@@ -44,10 +45,12 @@ func (ct *chanTransport) close() {
 
 type chanServerStream struct {
 	Context
+	svcInfo     *serviceInfo
+	lg          Logger
 	netconn     chanconn
 	connClose   *chan struct{}
-	srcChan     chan interface{}
-	privateChan chan interface{} // dedicated to the client
+	srcChan     chan *metaMsg
+	privateChan chan *metaMsg // dedicated to the client
 	timeouter
 }
 
@@ -61,7 +64,15 @@ func (ss *chanServerStream) Send(msg interface{}) error {
 	if *ss.connClose == nil {
 		return io.EOF
 	}
-	ss.srcChan <- msg
+	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		tag := fmt.Sprintf("%s/%s@%s send", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
+		err := traceMsg(msg, tracingID, tag, ss.netconn)
+		if err != nil {
+			ss.lg.Warnf("message tracing on server send error: %v", err)
+		}
+	}
+	ss.srcChan <- &metaMsg{msg, tracingID}
 	return nil
 }
 
@@ -80,7 +91,17 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 		return io.EOF
 	case <-ss.timeouter.timeoutChan():
 		return ErrRecvTimeout
-	case msg := <-ss.privateChan:
+	case mm := <-ss.privateChan:
+		msg := mm.msg
+		if mm.tracingID != nil {
+			tag := fmt.Sprintf("%s/%s@%s recv", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
+			err := traceMsg(msg, mm.tracingID, tag, ss.netconn)
+			if err != nil {
+				ss.lg.Warnf("message tracing on server recv error: %v", err)
+			}
+		}
+		getRoutineLocal().tracingID = mm.tracingID
+
 		if err, ok := msg.(error); ok {
 			return err
 		}
@@ -138,8 +159,10 @@ func (ca chanAddr) String() string {
 }
 
 func (ct *chanTransport) receiver() {
-	mq := ct.svc.s.mq
-	lg := ct.svc.s.lg
+	svc := ct.svc
+	mq := svc.s.mq
+	lg := svc.s.lg
+	svcInfo := &serviceInfo{svc.providerID, svc.publisherName, svc.serviceName}
 
 	for {
 		select {
@@ -148,27 +171,27 @@ func (ct *chanTransport) receiver() {
 		case hs := <-ct.acceptChan:
 			go func() {
 				connClose := hs.connClose
-				recvChan := make(chan *chanTransportMsg, ct.svc.s.qsize)
+				recvChan := make(chan *chanTransportMsg, svc.s.qsize)
 				hs.serverChanInfo <- recvChan
 				cc := chanconn{
 					localAddr:  chanAddr(uintptr(unsafe.Pointer(&ct.closed))),
 					remoteAddr: chanAddr(uintptr(unsafe.Pointer(&connClose))),
 				}
-				lg.Debugf("%s %s new chan connection from: %s", ct.svc.publisherName, ct.svc.serviceName, cc.RemoteAddr().String())
-				if ct.svc.fnOnConnect != nil {
-					lg.Debugf("%s %s on connect", ct.svc.publisherName, ct.svc.serviceName)
-					if ct.svc.fnOnConnect(cc) {
+				lg.Debugf("%s %s new chan connection from: %s", svc.publisherName, svc.serviceName, cc.RemoteAddr().String())
+				if svc.fnOnConnect != nil {
+					lg.Debugf("%s %s on connect", svc.publisherName, svc.serviceName)
+					if svc.fnOnConnect(cc) {
 						return
 					}
 				}
 				defer func() {
-					if ct.svc.fnOnDisconnect != nil {
-						lg.Debugf("%s %s on disconnect", ct.svc.publisherName, ct.svc.serviceName)
-						ct.svc.fnOnDisconnect(cc)
+					if svc.fnOnDisconnect != nil {
+						lg.Debugf("%s %s on disconnect", svc.publisherName, svc.serviceName)
+						svc.fnOnDisconnect(cc)
 					}
-					lg.Debugf("%s %s chan connection disconnected: %s", ct.svc.publisherName, ct.svc.serviceName, cc.RemoteAddr().String())
+					lg.Debugf("%s %s chan connection disconnected: %s", svc.publisherName, svc.serviceName, cc.RemoteAddr().String())
 				}()
-				ssMap := make(map[chan interface{}]*chanServerStream)
+				ssMap := make(map[chan *metaMsg]*chanServerStream)
 				for {
 					select {
 					case <-connClose:
@@ -179,36 +202,42 @@ func (ct *chanTransport) receiver() {
 						if ss == nil {
 							ss = &chanServerStream{
 								netconn:     cc,
+								svcInfo:     svcInfo,
+								lg:          lg,
 								connClose:   &connClose,
 								Context:     &contextImpl{},
 								srcChan:     tm.srcChan,
-								privateChan: make(chan interface{}, cap(tm.srcChan)),
+								privateChan: make(chan *metaMsg, cap(tm.srcChan)),
 							}
 							ssMap[tm.srcChan] = ss
-							if ct.svc.fnOnNewStream != nil {
-								lg.Debugf("%s %s on new stream %v", ct.svc.publisherName, ct.svc.serviceName, tm.srcChan)
-								ct.svc.fnOnNewStream(ss)
+							if svc.fnOnNewStream != nil {
+								lg.Debugf("%s %s on new stream %v", svc.publisherName, svc.serviceName, tm.srcChan)
+								svc.fnOnNewStream(ss)
 							}
 						}
 
 						if _, ok := tm.msg.(streamCloseMsg); ok { // check if stream close was sent
-							if ct.svc.fnOnStreamClose != nil {
-								ct.svc.fnOnStreamClose(ss)
-								lg.Debugf("%s %s on stream %v close", ct.svc.publisherName, ct.svc.serviceName, tm.srcChan)
+							if svc.fnOnStreamClose != nil {
+								svc.fnOnStreamClose(ss)
+								lg.Debugf("%s %s on stream %v close", svc.publisherName, svc.serviceName, tm.srcChan)
 							}
 							delete(ssMap, tm.srcChan)
 							continue
 						}
 
-						if ct.svc.canHandle(tm.msg) {
+						msg := tm.msg
+						tracingID := tm.tracingID
+						if svc.canHandle(tm.msg) {
 							mm := &metaKnownMsg{
-								stream: ss,
-								msg:    tm.msg.(KnownMessage),
+								stream:    ss,
+								msg:       msg.(KnownMessage),
+								tracingID: tracingID,
+								svcInfo:   svcInfo,
 							}
 							lg.Debugf("chan enqueue message <%#v>", mm.msg)
 							mq.putMetaMsg(mm)
 						} else {
-							ss.privateChan <- tm.msg
+							ss.privateChan <- &metaMsg{msg, tracingID}
 						}
 					}
 				}
