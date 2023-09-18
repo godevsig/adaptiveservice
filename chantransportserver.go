@@ -196,8 +196,11 @@ func (ct *chanTransport) receiver() {
 					select {
 					case <-connClose:
 						connClose = nil
-						return
+						close(recvChan)
 					case tm := <-recvChan:
+						if tm == nil {
+							return
+						}
 						ss := ssMap[tm.srcChan]
 						if ss == nil {
 							ss = &chanServerStream{
