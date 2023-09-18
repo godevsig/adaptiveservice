@@ -100,7 +100,7 @@ func ReadTracedMsg(token string) (string, error) {
 			indent = 0
 		}
 		fmt.Fprintf(&sb, "%v %s[%s] |%s| <%s>\n",
-			rcd.timeStamp.Format(timeNano),
+			rcd.timeStamp.Format(timeMicro),
 			strings.Repeat("\t", indent),
 			rcd.tag,
 			rcd.connInfo,
@@ -110,7 +110,7 @@ func ReadTracedMsg(token string) (string, error) {
 		}
 	}
 
-	reEmptyStruct := regexp.MustCompile(`\{.*?\}`)
+	reEmptyStruct := regexp.MustCompile(`\{.*\}`)
 	shortenMsg := func(msg string) string {
 		return reEmptyStruct.ReplaceAllString(msg, "") + "{}"
 	}
@@ -138,7 +138,7 @@ func ReadTracedMsg(token string) (string, error) {
 			fmt.Fprintf(&sb, "\"%s\" -> ", who)
 		case "handler":
 			svcs = append(svcs, who)
-			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeNano), shortenMsg(rcd.msg))
+			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeMicro), shortenMsg(rcd.msg))
 		case "recv":
 			ln := len(svcs)
 			if ln != 0 {
@@ -146,7 +146,7 @@ func ReadTracedMsg(token string) (string, error) {
 					who = svcs[ln-1]
 				}
 			}
-			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeNano), shortenMsg(rcd.msg))
+			fmt.Fprintf(&sb, "\"%s\": %v %s\n", who, rcd.timeStamp.Format(timeMicro), shortenMsg(rcd.msg))
 		}
 	}
 	return sb.String(), nil

@@ -68,10 +68,12 @@ const (
 	BuiltinPublisher = "builtin"
 	// OK can be returned by known messages as reply to indicate
 	// everything is OK. Client should use type int to receive it.
-	OK           = 0
-	asTmpDir     = "/tmp/adaptiveservice"
-	timeNano     = "15:04:05.000000"
-	dateTimeNano = "2006-01-02 15:04:05.000000"
+	OK            = 0
+	asTmpDir      = "/tmp/adaptiveservice"
+	timeMicro     = "15:04:05.000000"
+	dateTimeMicro = "2006-01-02 15:04:05.000000"
+	timeNano      = "15:04:05.000000000"
+	dateTimeNano  = "2006-01-02 15:04:05.000000000"
 )
 
 const (

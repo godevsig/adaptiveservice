@@ -44,7 +44,8 @@ type tracedMessageRecord struct {
 
 func (tmrcd *tracedMessageRecord) Handle(stream ContextStream) (reply any) {
 	mTracer := stream.GetContext().(*messageTracer)
-	mTracer.lg.Debugf("tracedMessage handler: <%#v>", tmrcd)
+	mTracer.lg.Debugf("tracedMessage handler: %v [%s] |%s| <%s>",
+		tmrcd.timeStamp, tmrcd.tag, tmrcd.connInfo, tmrcd.msg)
 
 	mTracer.RLock()
 	elem, has := mTracer.lut[*tmrcd.tracingID]
