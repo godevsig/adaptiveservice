@@ -307,11 +307,15 @@ func initSigCleaner(lg Logger) {
 	})
 }
 
+var name2Type = map[string]reflect.Type{}
+
 // RegisterType registers the type infomation to encoding sub system.
 func RegisterType(i interface{}) {
 	//gotiny.Register(i)
 	rt := reflect.TypeOf(i)
-	gotiny.RegisterName(rt.String(), rt)
+	name := rt.String()
+	gotiny.RegisterName(name, rt)
+	name2Type[name] = rt
 }
 
 // RegisterTypeNoPanic is like RegisterType but recovers from panic.
@@ -323,6 +327,27 @@ func RegisterTypeNoPanic(i interface{}) (err error) {
 	}()
 	RegisterType(i)
 	return
+}
+
+// GetKnownMessageTypes returns all KnownMessage types
+func GetKnownMessageTypes() []string {
+	var registered []string
+	for name, rt := range name2Type {
+		if m, ok := rt.MethodByName("Handle"); ok {
+			if strings.Contains(fmt.Sprintf("%v", m), "adaptiveservice.ContextStream") {
+				registered = append(registered, name)
+			}
+		}
+	}
+	return registered
+}
+
+// GetRegisteredTypeByName returns a reflect.Type if it has been registered
+func GetRegisteredTypeByName(name string) reflect.Type {
+	if rt, ok := name2Type[name]; ok {
+		return rt
+	}
+	return nil
 }
 
 // test if pattern matches str

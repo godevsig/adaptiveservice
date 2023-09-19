@@ -1,6 +1,7 @@
 package adaptiveservice
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -53,6 +54,15 @@ var tracedMsgList = struct {
 // TraceMsgByType can work with different input message types at the same time.
 func TraceMsgByType(msg any) (token string, err error) {
 	rtype := reflect.TypeOf(msg)
+	return TraceMsgByName(rtype.String())
+}
+
+// TraceMsgByName is like TraceMsgByType but take the message type name
+func TraceMsgByName(name string) (token string, err error) {
+	rtype := GetRegisteredTypeByName(name)
+	if rtype == nil {
+		return "", errors.New(name + " not traceable")
+	}
 	tracedMsgList.Lock()
 	defer tracedMsgList.Unlock()
 	if uuid, has := tracedMsgList.types[rtype]; has {
