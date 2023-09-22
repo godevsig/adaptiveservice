@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"time"
 
 	as "github.com/godevsig/adaptiveservice"
 	svca "github.com/godevsig/adaptiveservice/examples/msgtracing/service_a"
@@ -40,6 +41,8 @@ func main() {
 	}
 	fmt.Println(rep.Output)
 
+	// wait tracing service to handle the records
+	time.Sleep(time.Second)
 	// traced message records will be read cleared
 	msgs, err := as.ReadTracedMsg(token)
 	if err != nil {

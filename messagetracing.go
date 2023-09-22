@@ -6,18 +6,31 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/timandy/routine"
 )
 
-type uuidptr = *uuid.UUID
+type uuidConf struct {
+	id     uuid.UUID
+	count  uint32
+	seqNum uint32
+}
+
+type uuidInfo struct {
+	id     uuid.UUID
+	seqNum uint32
+}
+
+type uuidInfoPtr = *uuidInfo
 
 type infoPerRoutine struct {
-	tracingID uuidptr
+	tracingID uuidInfoPtr
 }
 
 var routineLocal = routine.NewThreadLocalWithInitial(func() any {
@@ -30,9 +43,9 @@ func getRoutineLocal() *infoPerRoutine {
 
 var tracedMsgList = struct {
 	sync.Mutex
-	types map[reflect.Type]uuidptr
+	types map[reflect.Type]*uuidConf
 }{
-	types: make(map[reflect.Type]uuidptr),
+	types: make(map[reflect.Type]*uuidConf),
 }
 
 // TraceMsgByType starts a message tracing session and returns the session token.
@@ -54,34 +67,106 @@ var tracedMsgList = struct {
 // TraceMsgByType can work with different input message types at the same time.
 func TraceMsgByType(msg any) (token string, err error) {
 	rtype := reflect.TypeOf(msg)
-	return TraceMsgByName(rtype.String())
+	return TraceMsgByNameWithCount(rtype.String(), 1)
+}
+
+// TraceMsgByTypeWithCount traces the message type specified by 'msg' 'count' times repeatedly.
+//  msg: any value with the same type of the message to be traced
+//  count: the maximum number is the value of MaxTracingSessions
+//   >0: trace count times
+//    0: stop tracing the specified message type
+// The returned token has below forms:
+//  if count > 1, for example count = 100
+//   30180061-1044-4b9e-a8ee-174806afe058.0..99
+//  if count = 1:
+//   30180061-1044-4b9e-a8ee-174806afe058.0
+//  if count = 0:
+//   NA
+func TraceMsgByTypeWithCount(msg any, count uint32) (token string, err error) {
+	rtype := reflect.TypeOf(msg)
+	return TraceMsgByNameWithCount(rtype.String(), count)
 }
 
 // TraceMsgByName is like TraceMsgByType but take the message type name
 func TraceMsgByName(name string) (token string, err error) {
+	return TraceMsgByNameWithCount(name, 1)
+}
+
+// TraceMsgByNameWithCount is like TraceMsgByTypeWithCount but take the message type name
+func TraceMsgByNameWithCount(name string, count uint32) (token string, err error) {
+	if count > MaxTracingSessions {
+		count = MaxTracingSessions
+	}
 	rtype := GetRegisteredTypeByName(name)
 	if rtype == nil {
 		return "", errors.New(name + " not traceable")
 	}
+
+	var id uuid.UUID
+	defer func() {
+		if err == nil {
+			idstr := id.String()
+			if count < 1 {
+				token = "NA"
+			} else if count > 1 {
+				token = fmt.Sprintf("%s.0..%d", idstr, count-1)
+			} else {
+				token = fmt.Sprintf("%s.0", idstr)
+			}
+		}
+	}()
+
 	tracedMsgList.Lock()
 	defer tracedMsgList.Unlock()
-	if uuid, has := tracedMsgList.types[rtype]; has {
-		return uuid.String(), nil
+	if count < 1 {
+		delete(tracedMsgList.types, rtype)
+		return
 	}
-	uuid, err := uuid.NewRandom()
+	if ucptr, has := tracedMsgList.types[rtype]; has {
+		if count < ucptr.seqNum {
+			count = ucptr.seqNum + 1
+		}
+		ucptr.count = count
+		id = ucptr.id
+		return
+	}
+	id, err = uuid.NewRandom()
 	if err != nil {
-		return "", fmt.Errorf("generate uuid error: %v", err)
+		return
 	}
-	tracedMsgList.types[rtype] = &uuid
-	return uuid.String(), nil
+	tracedMsgList.types[rtype] = &uuidConf{id, count, 0}
+	return
+}
+
+// UnTraceMsgAll untags all message types that have been tagged by TraceMsgBy* functions
+func UnTraceMsgAll() {
+	tracedMsgList.Lock()
+	tracedMsgList.types = make(map[reflect.Type]*uuidConf)
+	tracedMsgList.Unlock()
+}
+
+// ReadAllTracedMsg is equivalent to ReadTracedMsg("00000000-0000-0000-0000-000000000000.0")
+func ReadAllTracedMsg() (string, error) {
+	return ReadTracedMsg("00000000-0000-0000-0000-000000000000.0")
 }
 
 // ReadTracedMsg reads all the collected traced messages by the token returned
 // by TraceMsgByType().
+//  token: should be in the format like 30180061-1044-4b9e-a8ee-174806afe058.0
+//   Special tokens starting with 00000000-0000-0000-0000-000000000000
+//   are used to retrieve all records on behalf of all previous tokens.
 func ReadTracedMsg(token string) (string, error) {
-	uuid, err := uuid.Parse(token)
+	fields := strings.Split(token, ".")
+	if len(fields) != 2 {
+		return "", fmt.Errorf("%s format error", token)
+	}
+	id, err := uuid.Parse(fields[0])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("parse UUID error: %v", err)
+	}
+	seqNum, err := strconv.ParseUint(fields[1], 10, 32)
+	if err != nil {
+		return "", fmt.Errorf("parse sequence number error: %v", err)
 	}
 
 	c := NewClient().SetDiscoverTimeout(0)
@@ -89,7 +174,7 @@ func ReadTracedMsg(token string) (string, error) {
 	var allRecord []*tracedMessageRecord
 	for conn := range connChan {
 		records := []*tracedMessageRecord{}
-		conn.SendRecv(&readTracedMsg{&uuid}, &records)
+		conn.SendRecv(&readTracedMsg{&uuidInfo{id, uint32(seqNum)}}, &records)
 		if len(records) != 0 {
 			allRecord = append(allRecord, records...)
 		}
@@ -118,6 +203,9 @@ func ReadTracedMsg(token string) (string, error) {
 		if rcd.tag == "client send" {
 			indent++
 		}
+	}
+	if sb.Len() == 0 {
+		return "", nil
 	}
 
 	reEmptyStruct := regexp.MustCompile(`\{.*\}`)
@@ -162,7 +250,7 @@ func ReadTracedMsg(token string) (string, error) {
 	return sb.String(), nil
 }
 
-func getTracingID(msg any) uuidptr {
+func getTracingID(msg any) uuidInfoPtr {
 	// try to carry on with the tracingID from current goroutine context
 	tracingID := getRoutineLocal().tracingID
 	if tracingID != nil {
@@ -173,15 +261,25 @@ func getTracingID(msg any) uuidptr {
 	if len(tracedMsgList.types) == 0 {
 		return nil
 	}
+
 	rtype := reflect.TypeOf(msg)
 	tracedMsgList.Lock()
-	tracingID = tracedMsgList.types[rtype]
-	delete(tracedMsgList.types, rtype)
-	tracedMsgList.Unlock()
+	defer tracedMsgList.Unlock()
+
+	ucptr := tracedMsgList.types[rtype]
+	if ucptr == nil {
+		return nil
+	}
+	if ucptr.seqNum >= ucptr.count {
+		delete(tracedMsgList.types, rtype)
+		return nil
+	}
+	tracingID = &uuidInfo{ucptr.id, ucptr.seqNum}
+	atomic.AddUint32(&ucptr.seqNum, 1)
 	return tracingID
 }
 
-func traceMsg(msg any, tracingID uuidptr, tag string, netconn Netconn) error {
+func traceMsg(msg any, tracingID uuidInfoPtr, tag string, netconn Netconn) error {
 	if _, ok := msg.(*tracedMessageRecord); ok {
 		return nil // do not trace *tracedMessageRecord itself
 	}

@@ -43,13 +43,13 @@ type LowPriorityMessage interface {
 
 type metaMsg struct {
 	msg       any
-	tracingID uuidptr
+	tracingID uuidInfoPtr
 }
 
 type metaKnownMsg struct {
 	stream    ContextStream
 	msg       KnownMessage
-	tracingID uuidptr
+	tracingID uuidInfoPtr
 	svcInfo   *serviceInfo
 }
 

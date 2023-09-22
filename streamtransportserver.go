@@ -138,7 +138,7 @@ func (st *streamTransport) close() {
 type streamTransportMsg struct {
 	chanID    uint64 // client stream channel ID
 	msg       interface{}
-	tracingID uuidptr
+	tracingID uuidInfoPtr
 }
 
 type streamServerStream struct {

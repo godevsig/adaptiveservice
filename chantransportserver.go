@@ -11,7 +11,7 @@ import (
 type chanTransportMsg struct {
 	srcChan   chan *metaMsg
 	msg       interface{}
-	tracingID uuidptr
+	tracingID uuidInfoPtr
 }
 
 type handshake struct {
