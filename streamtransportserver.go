@@ -195,15 +195,18 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 		return io.EOF
 	}
 	tracingID := getTracingID(msg)
+	tm := streamTransportMsg{chanID: ss.chanID, msg: msg, tracingID: tracingID}
+	if err := ss.send(&tm); err != nil {
+		return err
+	}
+
 	if tracingID != nil {
 		tag := fmt.Sprintf("%s/%s@%s send", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
-		err := traceMsg(msg, tracingID, tag, ss.netconn)
-		if err != nil {
+		if err := traceMsg(msg, tracingID, tag, ss.netconn); err != nil {
 			ss.lg.Warnf("message tracing on server send error: %v", err)
 		}
 	}
-	tm := streamTransportMsg{chanID: ss.chanID, msg: msg, tracingID: tracingID}
-	return ss.send(&tm)
+	return nil
 }
 
 func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
@@ -225,8 +228,7 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 		msg := mm.msg
 		if mm.tracingID != nil {
 			tag := fmt.Sprintf("%s/%s@%s recv", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
-			err := traceMsg(msg, mm.tracingID, tag, ss.netconn)
-			if err != nil {
+			if err := traceMsg(msg, mm.tracingID, tag, ss.netconn); err != nil {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
 		}

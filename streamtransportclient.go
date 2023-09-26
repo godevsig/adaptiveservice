@@ -162,13 +162,6 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	lg := cs.conn.owner.lg
 
 	tracingID := getTracingID(msg)
-	if tracingID != nil {
-		err := traceMsg(msg, tracingID, "client send", cs.conn.netconn)
-		if err != nil {
-			lg.Warnf("message tracing on client send error: %v", err)
-		}
-	}
-
 	cid := uint64(uintptr(unsafe.Pointer(&cs.msgChan)))
 	tm := streamTransportMsg{chanID: cid, msg: msg, tracingID: tracingID}
 
@@ -197,6 +190,12 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	if _, err := buf.WriteTo(cs.conn.netconn); err != nil {
 		return err
 	}
+
+	if tracingID != nil {
+		if err := traceMsg(msg, tracingID, "client send", cs.conn.netconn); err != nil {
+			lg.Warnf("message tracing on client send error: %v", err)
+		}
+	}
 	return nil
 }
 
@@ -220,8 +219,7 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 	case mm := <-cs.msgChan:
 		msg := mm.msg
 		if mm.tracingID != nil {
-			err := traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn)
-			if err != nil {
+			if err := traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn); err != nil {
 				lg.Warnf("message tracing on client recv error: %v", err)
 			}
 		}

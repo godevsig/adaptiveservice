@@ -80,13 +80,12 @@ func (cs *chanClientStream) Send(msg interface{}) error {
 		msg = deepcopy.MustAnything(msg)
 	}
 	tracingID := getTracingID(msg)
+	cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.msgChan, msg: msg, tracingID: tracingID}
 	if tracingID != nil {
-		err := traceMsg(msg, tracingID, "client send", cs.GetNetconn())
-		if err != nil {
+		if err := traceMsg(msg, tracingID, "client send", cs.GetNetconn()); err != nil {
 			cs.conn.cct.owner.lg.Warnf("message tracing on client send error: %v", err)
 		}
 	}
-	cs.conn.serverChan <- &chanTransportMsg{srcChan: cs.msgChan, msg: msg, tracingID: tracingID}
 	return nil
 }
 
@@ -106,8 +105,7 @@ func (cs *chanClientStream) Recv(msgPtr interface{}) (err error) {
 	case mm := <-msgChan:
 		msg := mm.msg
 		if mm.tracingID != nil {
-			err := traceMsg(msg, mm.tracingID, "client recv", cs.GetNetconn())
-			if err != nil {
+			if err := traceMsg(msg, mm.tracingID, "client recv", cs.GetNetconn()); err != nil {
 				cs.conn.cct.owner.lg.Warnf("message tracing on client recv error: %v", err)
 			}
 		}

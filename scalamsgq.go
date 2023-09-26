@@ -106,8 +106,7 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			mq.lg.Debugf("worker handling message: <%#v>", mm.msg)
 			if mm.tracingID != nil {
 				tag := fmt.Sprintf("%s/%s@%s handler", mm.svcInfo.publisherName, mm.svcInfo.serviceName, mm.svcInfo.providerID)
-				err := traceMsg(mm.msg, mm.tracingID, tag, mm.stream.GetNetconn())
-				if err != nil {
+				if err := traceMsg(mm.msg, mm.tracingID, tag, mm.stream.GetNetconn()); err != nil {
 					mq.lg.Warnf("message tracing on server handler error: %v", err)
 				}
 			}
