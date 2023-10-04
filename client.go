@@ -24,6 +24,8 @@ func NewClient(options ...Option) *Client {
 		o(c.conf)
 	}
 
+	mTraceHelper.init(c.lg)
+
 	c.lg.Debugf("new client created")
 	return c
 }

@@ -202,7 +202,7 @@ func (ss *streamServerStream) Send(msg interface{}) error {
 
 	if tracingID != nil {
 		tag := fmt.Sprintf("%s/%s@%s send", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
-		if err := traceMsg(msg, tracingID, tag, ss.netconn); err != nil {
+		if err := mTraceHelper.traceMsg(msg, tracingID, tag, ss.netconn); err != nil {
 			ss.lg.Warnf("message tracing on server send error: %v", err)
 		}
 	}
@@ -228,7 +228,7 @@ func (ss *streamServerStream) Recv(msgPtr interface{}) (err error) {
 		msg := mm.msg
 		if mm.tracingID != nil {
 			tag := fmt.Sprintf("%s/%s@%s recv", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
-			if err := traceMsg(msg, mm.tracingID, tag, ss.netconn); err != nil {
+			if err := mTraceHelper.traceMsg(msg, mm.tracingID, tag, ss.netconn); err != nil {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
 		}

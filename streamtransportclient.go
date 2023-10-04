@@ -192,7 +192,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	}
 
 	if tracingID != nil {
-		if err := traceMsg(msg, tracingID, "client send", cs.conn.netconn); err != nil {
+		if err := mTraceHelper.traceMsg(msg, tracingID, "client send", cs.conn.netconn); err != nil {
 			lg.Warnf("message tracing on client send error: %v", err)
 		}
 	}
@@ -219,7 +219,7 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 	case mm := <-cs.msgChan:
 		msg := mm.msg
 		if mm.tracingID != nil {
-			if err := traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn); err != nil {
+			if err := mTraceHelper.traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn); err != nil {
 				lg.Warnf("message tracing on client recv error: %v", err)
 			}
 		}

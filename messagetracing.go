@@ -279,29 +279,91 @@ func getTracingID(msg any) uuidInfoPtr {
 	return tracingID
 }
 
-func traceMsg(msg any, tracingID uuidInfoPtr, tag string, netconn Netconn) error {
-	if _, ok := msg.(*tracedMessageRecord); ok {
-		return nil // do not trace *tracedMessageRecord itself
+type tracedMsgRaw struct {
+	timeStamp time.Time
+	msg       any
+	tracingID uuidInfoPtr
+	tag       string
+	netconn   Netconn
+}
+
+type msgTraceHelper struct {
+	tracedMsgChan chan *tracedMsgRaw
+	lg            Logger
+	once          sync.Once
+	undelivered   *tracedMessageRecord
+}
+
+var mTraceHelper = &msgTraceHelper{}
+
+func (mth *msgTraceHelper) init(lg Logger) {
+	if mth.lg == nil {
+		mth.lg = lg
 	}
-	c := NewClient().SetDiscoverTimeout(0)
+}
+
+func (mth *msgTraceHelper) run() error {
+	c := NewClient(WithLogger(mth.lg)).SetDiscoverTimeout(3)
 	conn := <-c.Discover(BuiltinPublisher, SrvMessageTracing)
 	if conn == nil {
 		return ErrServiceNotFound(BuiltinPublisher, SrvMessageTracing)
 	}
 	defer conn.Close()
 
-	local := netconn.LocalAddr()
-	connInfo := fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), netconn.RemoteAddr().String())
-	tracedMsg := tracedMessageRecord{
-		time.Now(),
-		fmt.Sprintf("%#v", msg),
-		tracingID,
-		tag,
-		connInfo,
+	deliver := func() error {
+		// one way send
+		if err := conn.Send(mth.undelivered); err != nil {
+			return fmt.Errorf("record message %v error: %v", *mth.undelivered, err)
+		}
+		mth.undelivered = nil
+		return nil
 	}
-	// one way send
-	if err := conn.Send(&tracedMsg); err != nil {
-		return fmt.Errorf("record message %v error: %v", tracedMsg, err)
+
+	if mth.undelivered != nil {
+		if err := deliver(); err != nil {
+			return err
+		}
 	}
+	for {
+		select {
+		case tracedMsgRaw := <-mth.tracedMsgChan:
+			local := tracedMsgRaw.netconn.LocalAddr()
+			remote := tracedMsgRaw.netconn.RemoteAddr()
+			tracedMsg := tracedMessageRecord{
+				tracedMsgRaw.timeStamp,
+				fmt.Sprintf("%#v", tracedMsgRaw.msg),
+				tracedMsgRaw.tracingID,
+				tracedMsgRaw.tag,
+				fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), remote.String()),
+			}
+			mth.undelivered = &tracedMsg
+			if err := deliver(); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func (mth *msgTraceHelper) runOnce() {
+	mth.once.Do(func() {
+		mth.tracedMsgChan = make(chan *tracedMsgRaw, 1024)
+		go func() {
+			for {
+				err := mth.run()
+				if err != nil {
+					mth.lg.Warnf("msgTraceHelper error: %v", err)
+				}
+			}
+		}()
+	})
+}
+
+func (mth *msgTraceHelper) traceMsg(msg any, tracingID uuidInfoPtr, tag string, netconn Netconn) error {
+	if _, ok := msg.(*tracedMessageRecord); ok {
+		return nil // do not trace *tracedMessageRecord itself
+	}
+
+	mth.runOnce()
+	mth.tracedMsgChan <- &tracedMsgRaw{time.Now(), msg, tracingID, tag, netconn}
 	return nil
 }

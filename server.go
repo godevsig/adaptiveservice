@@ -240,6 +240,7 @@ func (s *Server) init() error {
 		}
 		s.lg.Infof("message tracer started")
 	}
+	mTraceHelper.init(s.lg)
 
 	s.lg.Debugf("server initialized")
 	return nil
