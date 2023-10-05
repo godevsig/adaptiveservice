@@ -380,6 +380,7 @@ func (s *Server) Close() {
 	if s.closers == nil {
 		return
 	}
+	mTraceHelper.tryWait()
 	s.errRecovers <- noError{}
 }
 
@@ -394,6 +395,7 @@ func (s *Server) close() {
 	if s.closers == nil {
 		return
 	}
+	mTraceHelper.tryWait()
 	s.errRecovers <- unrecoverableError{ErrServerClosed}
 }
 

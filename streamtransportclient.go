@@ -141,6 +141,7 @@ func (conn *streamConnection) NewStream() Stream {
 }
 func (conn *streamConnection) Close() {
 	conn.netconn.Close()
+	mTraceHelper.tryWait()
 }
 
 func (cs *streamClientStream) GetNetconn() Netconn {

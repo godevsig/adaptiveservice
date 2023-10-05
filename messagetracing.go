@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -292,14 +293,39 @@ type msgTraceHelper struct {
 	lg            Logger
 	once          sync.Once
 	undelivered   *tracedMessageRecord
+	done          chan struct{}
+	failedCount   int
 }
 
-var mTraceHelper = &msgTraceHelper{}
+var mTraceHelper = &msgTraceHelper{done: make(chan struct{})}
 
 func (mth *msgTraceHelper) init(lg Logger) {
 	if mth.lg == nil {
 		mth.lg = lg
 	}
+}
+
+func (mth *msgTraceHelper) len() int {
+	len := len(mth.tracedMsgChan)
+	if mth.undelivered != nil {
+		len++
+	}
+	return len
+}
+
+func (mth *msgTraceHelper) tryWait() {
+	wait := mth.len()
+	for wait != 0 {
+		runtime.Gosched()
+		wait--
+	}
+}
+
+// It should be called from atexit() like function, but in go there is
+// no such mechanism, so probably no one is proper enough to call it.
+func (mth *msgTraceHelper) close() {
+	close(mth.tracedMsgChan)
+	<-mth.done
 }
 
 func (mth *msgTraceHelper) run() error {
@@ -316,6 +342,7 @@ func (mth *msgTraceHelper) run() error {
 			return fmt.Errorf("record message %v error: %v", *mth.undelivered, err)
 		}
 		mth.undelivered = nil
+		mth.failedCount = 0
 		return nil
 	}
 
@@ -327,6 +354,9 @@ func (mth *msgTraceHelper) run() error {
 	for {
 		select {
 		case tracedMsgRaw := <-mth.tracedMsgChan:
+			if tracedMsgRaw == nil {
+				return nil
+			}
 			local := tracedMsgRaw.netconn.LocalAddr()
 			remote := tracedMsgRaw.netconn.RemoteAddr()
 			tracedMsg := tracedMessageRecord{
@@ -346,13 +376,20 @@ func (mth *msgTraceHelper) run() error {
 
 func (mth *msgTraceHelper) runOnce() {
 	mth.once.Do(func() {
-		mth.tracedMsgChan = make(chan *tracedMsgRaw, 1024)
+		mth.tracedMsgChan = make(chan *tracedMsgRaw, 64)
 		go func() {
+			defer close(mth.done)
 			for {
 				err := mth.run()
-				if err != nil {
-					mth.lg.Warnf("msgTraceHelper error: %v", err)
+				if err == nil {
+					return
 				}
+				mth.failedCount++
+				if mth.failedCount >= 3 {
+					mth.lg.Errorf("shutdown msgTraceHelper after %d continouse errors", mth.failedCount)
+					return
+				}
+				mth.lg.Warnf("msgTraceHelper error: %v", err)
 			}
 		}()
 	})

@@ -54,6 +54,7 @@ func (conn *chanConnection) NewStream() Stream {
 
 func (conn *chanConnection) Close() {
 	close(conn.connClose)
+	mTraceHelper.tryWait()
 }
 
 func (cs *chanClientStream) GetNetconn() Netconn {
