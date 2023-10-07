@@ -164,6 +164,7 @@ func TraceMsgByNameWithFilters(name string, count uint32, filters []string) (tok
 			count = tcptr.seqNum + 1
 		}
 		tcptr.count = count
+		tcptr.filters = traceFilters
 		id = tcptr.id
 		return
 	}
