@@ -89,6 +89,14 @@ func TraceMsgByType(msg any, count uint32) (token string, err error) {
 	return TraceMsgByName(rtype.String(), count)
 }
 
+// TraceMsgByTypeWithFilters is like TraceMsgByType but takes extra filters.
+// Filter should be in the form of "field=pattern", in which pattern supports simple wildcard.
+// Tracing sessions start only if all filters match their patterns.
+func TraceMsgByTypeWithFilters(msg any, count uint32, filters []string) (token string, err error) {
+	rtype := reflect.TypeOf(msg)
+	return TraceMsgByNameWithFilters(rtype.String(), count, filters)
+}
+
 // TraceMsgByName is like TraceMsgByType but takes the message type name
 func TraceMsgByName(name string, count uint32) (token string, err error) {
 	return TraceMsgByNameWithFilters(name, count, nil)
@@ -99,9 +107,7 @@ type msgTracingFilter struct {
 	pattern string
 }
 
-// TraceMsgByNameWithFilters is like TraceMsgByName but takes extra filters.
-// Filter should be in the form of "field=pattern", in which pattern supports simple wildcard.
-// A tracing session starts only if all filters match their pattern.
+// TraceMsgByNameWithFilters is like TraceMsgByTypeWithFilters but takes the message type name
 func TraceMsgByNameWithFilters(name string, count uint32, filters []string) (token string, err error) {
 	if count > MaxTracingSessions {
 		count = MaxTracingSessions
@@ -112,16 +118,25 @@ func TraceMsgByNameWithFilters(name string, count uint32, filters []string) (tok
 	}
 
 	var traceFilters []traceFilter
-	for _, filter := range filters {
-		strs := strings.Split(filter, "=")
-		if len(strs) != 2 {
-			return "", fmt.Errorf("%s format error", filter)
+	if len(filters) != 0 {
+		rt := rtype
+		if rt.Kind() == reflect.Pointer {
+			rt = rt.Elem()
 		}
-		field, pattern := strs[0], strs[1]
-		if _, has := rtype.FieldByName(field); !has {
-			return "", fmt.Errorf("no field %s found", field)
+		if rt.Kind() != reflect.Struct {
+			return "", fmt.Errorf("type %s not supported", rt.Kind())
 		}
-		traceFilters = append(traceFilters, traceFilter{field, pattern})
+		for _, filter := range filters {
+			strs := strings.Split(filter, "=")
+			if len(strs) != 2 {
+				return "", fmt.Errorf("%s format error", filter)
+			}
+			field, pattern := strs[0], strs[1]
+			if _, has := rt.FieldByName(field); !has {
+				return "", fmt.Errorf("no field %s found", field)
+			}
+			traceFilters = append(traceFilters, traceFilter{field, pattern})
+		}
 	}
 
 	var id uuid.UUID
@@ -306,9 +321,15 @@ func getTracingID(msg any) uuidInfoPtr {
 	}
 
 	if len(tcptr.filters) != 0 {
-		rmsg := reflect.ValueOf(msg)
+		rv := reflect.ValueOf(msg)
+		if rv.Kind() == reflect.Pointer {
+			rv = rv.Elem()
+		}
+		if rv.Kind() != reflect.Struct {
+			return nil
+		}
 		for _, filter := range tcptr.filters {
-			value := rmsg.FieldByName(filter.field)
+			value := rv.FieldByName(filter.field)
 			if !wildcardMatch(filter.pattern, fmt.Sprintf("%v", value)) {
 				return nil
 			}

@@ -27,14 +27,21 @@ func main() {
 	}
 	defer conn.Close()
 
-	// tracing only one session
-	token, err := as.TraceMsgByType((*svca.Request)(nil), 1)
+	// tracing only one session, with filter
+	token, err := as.TraceMsgByTypeWithFilters((*svca.Request)(nil), 1, []string{"Input=N*Hao"})
 	if err != nil {
 		fmt.Println(err)
 	}
 
-	req := svca.Request{Input: "Ni Hao"}
+	req := svca.Request{Input: "Zai Ma"}
 	var rep svca.Reply
+	if err := conn.SendRecv(&req, &rep); err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(rep.Output)
+
+	req = svca.Request{Input: "Ni Hao"}
 	if err := conn.SendRecv(&req, &rep); err != nil {
 		fmt.Println(err)
 		return
