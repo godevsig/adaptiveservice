@@ -1,7 +1,6 @@
 package adaptiveservice
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -17,10 +16,16 @@ import (
 	"github.com/timandy/routine"
 )
 
-type uuidConf struct {
-	id     uuid.UUID
-	count  uint32
-	seqNum uint32
+type traceFilter struct {
+	field   string
+	pattern string
+}
+
+type traceConf struct {
+	id      uuid.UUID
+	count   uint32
+	seqNum  uint32
+	filters []traceFilter
 }
 
 type uuidInfo struct {
@@ -44,12 +49,13 @@ func getRoutineLocal() *infoPerRoutine {
 
 var tracedMsgList = struct {
 	sync.Mutex
-	types map[reflect.Type]*uuidConf
+	types map[reflect.Type]*traceConf
 }{
-	types: make(map[reflect.Type]*uuidConf),
+	types: make(map[reflect.Type]*traceConf),
 }
 
-// TraceMsgByType starts a message tracing session and returns the session token.
+// TraceMsgByType traces the message type specified by 'msg' 'count' times repeatedly.
+// Each matching of the 'msg' type starts a message tracing session and has a unique session token.
 //
 // Tracing is type based and always starts from the client side.
 // If a message to be sent by client matches the specified type, it is marked as traced message,
@@ -62,16 +68,11 @@ var tracedMsgList = struct {
 // the same traced flag and propagate the flag further to next hop and next next hop...
 // All related messages with traced flag will be recorded by built-in service "messageTracing".
 //  msg: any value with the same type of the message to be traced
-// A call to TraceMsgByType() only starts a one time tracing session.
+// A call to TraceMsgByType() with 'count' equals 1 only starts a one time tracing session.
 // The subsequent messages with the same type will not be traced unless another call
 // to TraceMsgByType() is made with the same type.
 // TraceMsgByType can work with different input message types at the same time.
-func TraceMsgByType(msg any) (token string, err error) {
-	rtype := reflect.TypeOf(msg)
-	return TraceMsgByNameWithCount(rtype.String(), 1)
-}
-
-// TraceMsgByTypeWithCount traces the message type specified by 'msg' 'count' times repeatedly.
+//
 //  msg: any value with the same type of the message to be traced
 //  count: the maximum number is the value of MaxTracingSessions
 //   >0: trace count times
@@ -83,24 +84,44 @@ func TraceMsgByType(msg any) (token string, err error) {
 //   30180061-1044-4b9e-a8ee-174806afe058.0
 //  if count = 0:
 //   NA
-func TraceMsgByTypeWithCount(msg any, count uint32) (token string, err error) {
+func TraceMsgByType(msg any, count uint32) (token string, err error) {
 	rtype := reflect.TypeOf(msg)
-	return TraceMsgByNameWithCount(rtype.String(), count)
+	return TraceMsgByName(rtype.String(), count)
 }
 
-// TraceMsgByName is like TraceMsgByType but take the message type name
-func TraceMsgByName(name string) (token string, err error) {
-	return TraceMsgByNameWithCount(name, 1)
+// TraceMsgByName is like TraceMsgByType but takes the message type name
+func TraceMsgByName(name string, count uint32) (token string, err error) {
+	return TraceMsgByNameWithFilters(name, count, nil)
 }
 
-// TraceMsgByNameWithCount is like TraceMsgByTypeWithCount but take the message type name
-func TraceMsgByNameWithCount(name string, count uint32) (token string, err error) {
+type msgTracingFilter struct {
+	field   string
+	pattern string
+}
+
+// TraceMsgByNameWithFilters is like TraceMsgByName but takes extra filters.
+// Filter should be in the form of "field=pattern", in which pattern supports simple wildcard.
+// A tracing session starts only if all filters match their pattern.
+func TraceMsgByNameWithFilters(name string, count uint32, filters []string) (token string, err error) {
 	if count > MaxTracingSessions {
 		count = MaxTracingSessions
 	}
 	rtype := GetRegisteredTypeByName(name)
 	if rtype == nil {
-		return "", errors.New(name + " not traceable")
+		return "", fmt.Errorf("%s not traceable", name)
+	}
+
+	var traceFilters []traceFilter
+	for _, filter := range filters {
+		strs := strings.Split(filter, "=")
+		if len(strs) != 2 {
+			return "", fmt.Errorf("%s format error", filter)
+		}
+		field, pattern := strs[0], strs[1]
+		if _, has := rtype.FieldByName(field); !has {
+			return "", fmt.Errorf("no field %s found", field)
+		}
+		traceFilters = append(traceFilters, traceFilter{field, pattern})
 	}
 
 	var id uuid.UUID
@@ -123,26 +144,26 @@ func TraceMsgByNameWithCount(name string, count uint32) (token string, err error
 		delete(tracedMsgList.types, rtype)
 		return
 	}
-	if ucptr, has := tracedMsgList.types[rtype]; has {
-		if count < ucptr.seqNum {
-			count = ucptr.seqNum + 1
+	if tcptr, has := tracedMsgList.types[rtype]; has {
+		if count < tcptr.seqNum {
+			count = tcptr.seqNum + 1
 		}
-		ucptr.count = count
-		id = ucptr.id
+		tcptr.count = count
+		id = tcptr.id
 		return
 	}
 	id, err = uuid.NewRandom()
 	if err != nil {
 		return
 	}
-	tracedMsgList.types[rtype] = &uuidConf{id, count, 0}
+	tracedMsgList.types[rtype] = &traceConf{id, count, 0, traceFilters}
 	return
 }
 
 // UnTraceMsgAll untags all message types that have been tagged by TraceMsgBy* functions
 func UnTraceMsgAll() {
 	tracedMsgList.Lock()
-	tracedMsgList.types = make(map[reflect.Type]*uuidConf)
+	tracedMsgList.types = make(map[reflect.Type]*traceConf)
 	tracedMsgList.Unlock()
 }
 
@@ -263,20 +284,39 @@ func getTracingID(msg any) uuidInfoPtr {
 		return nil
 	}
 
-	rtype := reflect.TypeOf(msg)
-	tracedMsgList.Lock()
-	defer tracedMsgList.Unlock()
+	getTraceConf := func() *traceConf {
+		rtype := reflect.TypeOf(msg)
+		tracedMsgList.Lock()
+		defer tracedMsgList.Unlock()
 
-	ucptr := tracedMsgList.types[rtype]
-	if ucptr == nil {
+		tcptr := tracedMsgList.types[rtype]
+		if tcptr == nil {
+			return nil
+		}
+		if tcptr.seqNum >= tcptr.count {
+			delete(tracedMsgList.types, rtype)
+			return nil
+		}
+		return tcptr
+	}
+
+	tcptr := getTraceConf()
+	if tcptr == nil {
 		return nil
 	}
-	if ucptr.seqNum >= ucptr.count {
-		delete(tracedMsgList.types, rtype)
-		return nil
+
+	if len(tcptr.filters) != 0 {
+		rmsg := reflect.ValueOf(msg)
+		for _, filter := range tcptr.filters {
+			value := rmsg.FieldByName(filter.field)
+			if !wildcardMatch(filter.pattern, fmt.Sprintf("%v", value)) {
+				return nil
+			}
+		}
 	}
-	tracingID = &uuidInfo{ucptr.id, ucptr.seqNum}
-	atomic.AddUint32(&ucptr.seqNum, 1)
+
+	tracingID = &uuidInfo{tcptr.id, tcptr.seqNum}
+	atomic.AddUint32(&tcptr.seqNum, 1)
 	return tracingID
 }
 

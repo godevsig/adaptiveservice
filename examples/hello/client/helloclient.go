@@ -23,7 +23,7 @@ func main() {
 	defer conn.Close()
 
 	// tracing only one session
-	token, err := as.TraceMsgByType(msg.HelloRequest{})
+	token, err := as.TraceMsgByType(msg.HelloRequest{}, 1)
 	if err != nil {
 		fmt.Println(err)
 	}

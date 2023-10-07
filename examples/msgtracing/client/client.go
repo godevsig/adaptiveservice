@@ -28,7 +28,7 @@ func main() {
 	defer conn.Close()
 
 	// tracing only one session
-	token, err := as.TraceMsgByType((*svca.Request)(nil))
+	token, err := as.TraceMsgByType((*svca.Request)(nil), 1)
 	if err != nil {
 		fmt.Println(err)
 	}
