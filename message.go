@@ -74,5 +74,5 @@ func (tfs transportFeats) getTracingID() uuidInfoPtr {
 }
 
 func init() {
-	RegisterType((*uuidInfo)(nil))
+	RegisterType(uuidInfoPtr(nil))
 }
