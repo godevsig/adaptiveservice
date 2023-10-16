@@ -124,7 +124,7 @@ func (conn *streamConnection) receiver() {
 					}
 				}()
 				msgChan := *(*chan *metaMsg)(unsafe.Pointer(uintptr(tm.chanID)))
-				msgChan <- &metaMsg{tm.msg, tm.tracingID}
+				msgChan <- &metaMsg{tm.msg, tm.transportFeats}
 			}()
 		} else {
 			panic("msg channel not specified")
@@ -162,9 +162,13 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	}
 	lg := cs.conn.owner.lg
 
-	tracingID := getTracingID(msg)
 	cid := uint64(uintptr(unsafe.Pointer(&cs.msgChan)))
-	tm := streamTransportMsg{chanID: cid, msg: msg, tracingID: tracingID}
+	var tfs transportFeats
+	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		tfs = append(tfs, tracingID)
+	}
+	tm := streamTransportMsg{chanID: cid, msg: msg, transportFeats: tfs}
 
 	buf := net.Buffers{}
 	mainCopy := false
@@ -219,8 +223,9 @@ func (cs *streamClientStream) Recv(msgPtr interface{}) (err error) {
 		return ErrRecvTimeout
 	case mm := <-cs.msgChan:
 		msg := mm.msg
-		if mm.tracingID != nil {
-			if err := mTraceHelper.traceMsg(msg, mm.tracingID, "client recv", cs.conn.netconn); err != nil {
+		tracingID := mm.getTracingID()
+		if tracingID != nil {
+			if err := mTraceHelper.traceMsg(msg, tracingID, "client recv", cs.conn.netconn); err != nil {
 				lg.Warnf("message tracing on client recv error: %v", err)
 			}
 		}

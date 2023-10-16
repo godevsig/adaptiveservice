@@ -42,19 +42,37 @@ type LowPriorityMessage interface {
 }
 
 type metaMsg struct {
-	msg       any
-	tracingID uuidInfoPtr
+	msg any
+	transportFeats
 }
 
 type metaKnownMsg struct {
-	stream    ContextStream
-	msg       KnownMessage
-	tracingID uuidInfoPtr
-	svcInfo   *serviceInfo
+	stream  ContextStream
+	svcInfo *serviceInfo
+	msg     KnownMessage
+	transportFeats
 }
 
 type serviceInfo struct {
 	providerID    string
 	publisherName string
 	serviceName   string
+}
+
+// all elements should be pointers
+// 0: uuidInfoPtr
+// 1: to be extended
+// 2: to be extended
+// 3: ...
+type transportFeats []any
+
+func (tfs transportFeats) getTracingID() uuidInfoPtr {
+	if len(tfs) == 0 {
+		return nil
+	}
+	return tfs[0].(uuidInfoPtr)
+}
+
+func init() {
+	RegisterType((*uuidInfo)(nil))
 }

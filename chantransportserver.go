@@ -9,9 +9,9 @@ import (
 )
 
 type chanTransportMsg struct {
-	srcChan   chan *metaMsg
-	msg       interface{}
-	tracingID uuidInfoPtr
+	srcChan chan *metaMsg
+	msg     interface{}
+	transportFeats
 }
 
 type handshake struct {
@@ -64,14 +64,18 @@ func (ss *chanServerStream) Send(msg interface{}) error {
 	if *ss.connClose == nil {
 		return io.EOF
 	}
+	var tfs transportFeats
 	tracingID := getTracingID(msg)
+	if tracingID != nil {
+		tfs = append(tfs, tracingID)
+	}
+	ss.srcChan <- &metaMsg{msg, tfs}
 	if tracingID != nil {
 		tag := fmt.Sprintf("%s/%s@%s send", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
 		if err := mTraceHelper.traceMsg(msg, tracingID, tag, ss.netconn); err != nil {
 			ss.lg.Warnf("message tracing on server send error: %v", err)
 		}
 	}
-	ss.srcChan <- &metaMsg{msg, tracingID}
 	return nil
 }
 
@@ -92,13 +96,14 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 		return ErrRecvTimeout
 	case mm := <-ss.privateChan:
 		msg := mm.msg
-		if mm.tracingID != nil {
+		tracingID := mm.getTracingID()
+		if tracingID != nil {
 			tag := fmt.Sprintf("%s/%s@%s recv", ss.svcInfo.publisherName, ss.svcInfo.serviceName, ss.svcInfo.providerID)
-			if err := mTraceHelper.traceMsg(msg, mm.tracingID, tag, ss.netconn); err != nil {
+			if err := mTraceHelper.traceMsg(msg, tracingID, tag, ss.netconn); err != nil {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
 		}
-		getRoutineLocal().tracingID = mm.tracingID
+		getRoutineLocal().tracingID = tracingID
 
 		if err, ok := msg.(error); ok {
 			return err
@@ -227,18 +232,18 @@ func (ct *chanTransport) receiver() {
 						}
 
 						msg := tm.msg
-						tracingID := tm.tracingID
+						tfs := tm.transportFeats
 						if svc.canHandle(tm.msg) {
 							mm := &metaKnownMsg{
-								stream:    ss,
-								msg:       msg.(KnownMessage),
-								tracingID: tracingID,
-								svcInfo:   svcInfo,
+								stream:         ss,
+								svcInfo:        svcInfo,
+								msg:            msg.(KnownMessage),
+								transportFeats: tfs,
 							}
 							lg.Debugf("chan enqueue message <%#v>", mm.msg)
 							mq.putMetaMsg(mm)
 						} else {
-							ss.privateChan <- &metaMsg{msg, tracingID}
+							ss.privateChan <- &metaMsg{msg, tfs}
 						}
 					}
 				}

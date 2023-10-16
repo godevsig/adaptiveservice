@@ -104,13 +104,14 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 		case mm := <-mq.getEgressChan():
 			st.working()
 			mq.lg.Debugf("worker handling message: <%#v>", mm.msg)
-			if mm.tracingID != nil {
+			tracingID := mm.getTracingID()
+			if tracingID != nil {
 				tag := fmt.Sprintf("%s/%s@%s handler", mm.svcInfo.publisherName, mm.svcInfo.serviceName, mm.svcInfo.providerID)
-				if err := mTraceHelper.traceMsg(mm.msg, mm.tracingID, tag, mm.stream.GetNetconn()); err != nil {
+				if err := mTraceHelper.traceMsg(mm.msg, tracingID, tag, mm.stream.GetNetconn()); err != nil {
 					mq.lg.Warnf("message tracing on server handler error: %v", err)
 				}
 			}
-			getRoutineLocal().tracingID = mm.tracingID
+			getRoutineLocal().tracingID = tracingID
 			reply := mm.msg.Handle(mm.stream)
 			mq.lg.Debugf("worker handled, reply: <%#v>", reply)
 			if reply != nil {
