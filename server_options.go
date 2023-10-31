@@ -1,15 +1,15 @@
 package adaptiveservice
 
-import "strings"
-
-// SetPublisher declares the publisher of the server, which for example
-// is usually an organization name. The name should not contain "_" or "/".
-// Default is "default.org".
-func (s *Server) SetPublisher(publisher string) *Server {
-	if strings.ContainsAny(publisher, "_/") {
-		panic("publisher should not contain _ or /")
+// SetPublisher declares the publisher of the server, which
+// is usually an organization name.
+// The default value of publisherName is "default.org".
+//
+// SetPublisher panics if publisherName contains "_" or "/" or whitespace.
+func (s *Server) SetPublisher(publisherName string) *Server {
+	if err := checkNameConvention(publisherName); err != nil {
+		panic(err)
 	}
-	s.publisher = publisher
+	s.publisher = publisherName
 	return s
 }
 

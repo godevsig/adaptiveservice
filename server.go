@@ -327,14 +327,23 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	return nil
 }
 
+func checkNameConvention(name string) error {
+	if strings.ContainsAny(name, "_/ \n\r\t") {
+		return errors.New("name should not contain _ or / or whitespace")
+	}
+	return nil
+}
+
 // Publish publishes service to all available scope of Server s.
 // knownMessages are messages that the service can handle, e.g.
 // []KnownMessage{(*PublicStructA)(nil), (*PublicStructB)(nil), ...},
 // where (*PublicStructA) and (*PublicStructB) are the known messages that
 // have `Handle(stream ContextStream) reply interface{}` method.
+//
+// Publish panics if serviceName contains "_" or "/" or whitespace.
 func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
-	if strings.ContainsAny(serviceName, "_/") {
-		panic("serviceName should not contain _ or /")
+	if err := checkNameConvention(serviceName); err != nil {
+		panic(err)
 	}
 	return s.publish(s.scope, s.publisher, serviceName, knownMessages, options...)
 }
@@ -342,8 +351,8 @@ func (s *Server) Publish(serviceName string, knownMessages []KnownMessage, optio
 // PublishIn is like Publish, but with specified scope which should be
 // a subset of the scope of Server s.
 func (s *Server) PublishIn(scope Scope, serviceName string, knownMessages []KnownMessage, options ...ServiceOption) error {
-	if strings.ContainsAny(serviceName, "_/") {
-		panic("serviceName should not contain _ or /")
+	if err := checkNameConvention(serviceName); err != nil {
+		panic(err)
 	}
 	return s.publish(scope, s.publisher, serviceName, knownMessages, options...)
 }
