@@ -1,16 +1,20 @@
 package adaptiveservice
 
 import (
+	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Client uses services.
 type Client struct {
 	*conf
-	discoverTimeout int // in seconds
-	deepCopy        bool
+	providerSelectionMethods []ProviderSelectionMethod
+	discoverTimeout          int // in seconds
+	deepCopy                 bool
 }
 
 // NewClient creates a client which discovers services.
@@ -27,6 +31,18 @@ func NewClient(options ...Option) *Client {
 	mTraceHelper.init(c.lg)
 	c.lg.Debugf("new client created")
 	return c
+}
+
+type providerScoreInfo struct {
+	addr    string
+	mqi     *MsgQInfo
+	score   float32
+	latency time.Duration
+}
+
+func (pi *providerScoreInfo) String() string {
+	return fmt.Sprintf("providerScoreInfo:{addr: %v msgQinfo: %+v score: %v latency: %v}",
+		pi.addr, *pi.mqi, pi.score, pi.latency)
 }
 
 // Discover discovers the wanted service and returns the connection channel,
@@ -121,15 +137,9 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 	}
 
 	findNetwork := func(expect int) (found int) {
-		var addrs []string
-
-		connect := func() {
-			for len(addrs) != 0 && found != expect {
-				i := rand.Intn(len(addrs))
+		connect := func(addrs []string) {
+			for i := 0; i < len(addrs) && found != expect; i++ {
 				addr := addrs[i]
-				addrs[i] = addrs[len(addrs)-1]
-				addrs = addrs[:len(addrs)-1]
-
 				conn, err := c.newTCPConnection(addr)
 				if err != nil {
 					c.lg.Warnf("dial " + addr + " failed")
@@ -141,10 +151,95 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			}
 		}
 
+		selectAndConnect := func(addrs []string) {
+			rand.Shuffle(len(addrs), func(i, j int) { addrs[i], addrs[j] = addrs[j], addrs[i] })
+			if len(c.providerSelectionMethods) != 0 {
+				providerScoreInfoChan := make(chan *providerScoreInfo, len(addrs))
+				var wg sync.WaitGroup
+				for _, addr := range addrs {
+					wg.Add(1)
+					go func(addr string) {
+						defer wg.Done()
+						conn, err := c.newTCPConnection(addr)
+						if err != nil {
+							c.lg.Warnf("dial " + addr + " failed")
+							return
+						}
+						defer conn.Close()
+						conn.SetRecvTimeout(3 * time.Second)
+
+						var mqi MsgQInfo
+						pinfo := providerScoreInfo{
+							addr: addr,
+							mqi:  &mqi,
+						}
+						ts := time.Now()
+						for i := 0; i < 4; i++ {
+							err := conn.SendRecv(QueryMsgQInfo{}, &mqi)
+							if err != nil {
+								c.lg.Warnf("%v", err)
+								return
+							}
+						}
+						pinfo.latency = time.Now().Sub(ts) / 4
+						if mqi.QueueWeight > 0 {
+							pinfo.score = float32(mqi.NumCPU) / float32(mqi.QueueLen/mqi.QueueWeight+mqi.ResidentWorkers+mqi.BusyWorkerNum)
+						} else {
+							workableCPU := mqi.ResidentWorkers
+							if workableCPU > mqi.NumCPU {
+								workableCPU = mqi.NumCPU
+							}
+							pinfo.score = 0 - float32(mqi.IdleWorkerNum+workableCPU)/float32(mqi.IdleWorkerNum*workableCPU)
+						}
+						providerScoreInfoChan <- &pinfo
+					}(addr)
+				}
+				wg.Wait()
+				close(providerScoreInfoChan)
+				c.lg.Debugf("provider msgQ info scaned")
+				providerScoreInfos := make([]*providerScoreInfo, 0, len(providerScoreInfoChan))
+				for pinfo := range providerScoreInfoChan {
+					providerScoreInfos = append(providerScoreInfos, pinfo)
+				}
+
+				sorted := false
+				for _, method := range c.providerSelectionMethods {
+					switch method {
+					case Capacity:
+						c.lg.Debugf("sort %v by Capacity", providerScoreInfos)
+						providerScoreInfos := providerScoreInfos
+						if sorted {
+							providerScoreInfos = providerScoreInfos[:len(providerScoreInfos)/2]
+						}
+						sort.SliceStable(providerScoreInfos, func(i, j int) bool {
+							return providerScoreInfos[i].score > providerScoreInfos[j].score
+						})
+						sorted = true
+					case Latency:
+						c.lg.Debugf("sort %v by Latency", providerScoreInfos)
+						providerScoreInfos := providerScoreInfos
+						if sorted {
+							providerScoreInfos = providerScoreInfos[:len(providerScoreInfos)/2]
+						}
+						sort.SliceStable(providerScoreInfos, func(i, j int) bool {
+							return providerScoreInfos[i].latency < providerScoreInfos[j].latency
+						})
+						sorted = true
+					}
+				}
+				c.lg.Debugf("sorted providerScoreInfos: %v", providerScoreInfos)
+				addrs = make([]string, 0, len(addrs))
+				for _, pinfo := range providerScoreInfos {
+					addrs = append(addrs, pinfo.addr)
+				}
+			}
+			connect(addrs)
+		}
+
 		if found != expect && c.scope&ScopeLAN == ScopeLAN {
 			c.lg.Debugf("finding %s_%s in ScopeLAN", publisher, service)
-			addrs = c.lookupServiceLAN(publisher, service, providerIDs...)
-			connect()
+			addrs := c.lookupServiceLAN(publisher, service, providerIDs...)
+			selectAndConnect(addrs)
 		}
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
 			c.lg.Debugf("finding %s_%s in ScopeWAN", publisher, service)
@@ -157,8 +252,8 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 				c.lg.Debugf("discovered registry address: %s", addr)
 			}
 			if c.registryAddr != "NA" {
-				addrs = c.lookupServiceWAN(publisher, service, providerIDs...)
-				connect()
+				addrs := c.lookupServiceWAN(publisher, service, providerIDs...)
+				selectAndConnect(addrs)
 			}
 		}
 		return found

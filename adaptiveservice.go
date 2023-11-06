@@ -91,7 +91,8 @@ const (
 	ScopeWAN
 	// ScopeNetwork is a shortcut for ScopeLAN and ScopeWAN
 	ScopeNetwork = ScopeLAN | ScopeWAN
-	// ScopeAll includes all scopes.
+	// ScopeAll includes all scopes, this is the default value if
+	// no other Scope specified.
 	ScopeAll = ScopeProcess | ScopeOS | ScopeLAN | ScopeWAN
 )
 

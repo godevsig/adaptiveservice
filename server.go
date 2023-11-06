@@ -127,7 +127,9 @@ func (s *Server) init() error {
 	}
 
 	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
-		if id, err := discoverProviderID(s.lg); err != nil {
+		if len(s.providerID) != 0 {
+			s.lg.Infof("user specified provider ID: %s", s.providerID)
+		} else if id, err := discoverProviderID(s.lg); err != nil {
 			if len(s.providerID) == 0 {
 				s.providerID = genID()
 			}
@@ -290,6 +292,7 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 			scope:         scope,
 		}
 
+		knownMessages = append(knownMessages, QueryMsgQInfo{})
 		for _, msg := range knownMessages {
 			tp := reflect.TypeOf(msg)
 			svc.knownMsgTypes[tp] = struct{}{}

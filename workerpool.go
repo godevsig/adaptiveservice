@@ -9,8 +9,9 @@ import (
 type workerPool struct {
 	wg sync.WaitGroup
 	sync.Mutex
-	workers []*chan struct{}
-	cnt     int32
+	workers   []*chan struct{}
+	count     int32
+	idleCount int32
 }
 
 // newWorkerPool creates a new workerPool.
@@ -24,10 +25,10 @@ type status interface {
 }
 
 func (wp *workerPool) idle() {
-	atomic.AddInt32(&wp.cnt, 1)
+	atomic.AddInt32(&wp.idleCount, 1)
 }
 func (wp *workerPool) working() {
-	atomic.AddInt32(&wp.cnt, -1)
+	atomic.AddInt32(&wp.idleCount, -1)
 }
 
 // worker is a function with a cancel channel it should check for exit.
@@ -49,7 +50,8 @@ func (wp *workerPool) addWorker(w worker) {
 	if !added {
 		wp.workers = append(wp.workers, &done)
 	}
-	atomic.AddInt32(&wp.cnt, 1)
+	atomic.AddInt32(&wp.count, 1)
+	atomic.AddInt32(&wp.idleCount, 1)
 	wp.wg.Add(1)
 	go func() {
 		defer func() {
@@ -57,7 +59,8 @@ func (wp *workerPool) addWorker(w worker) {
 				close(done)
 				done = nil
 			}
-			atomic.AddInt32(&wp.cnt, -1)
+			atomic.AddInt32(&wp.idleCount, -1)
+			atomic.AddInt32(&wp.count, -1)
 			wp.wg.Done()
 		}()
 		w(done, wp)
@@ -99,8 +102,14 @@ func (wp *workerPool) close() {
 	wp.wg.Wait()
 }
 
-// len returns the number of idle workers in the workerPool.
-func (wp *workerPool) len() int {
-	cnt := atomic.LoadInt32(&wp.cnt)
+// getIdleCount returns the number of idle workers in the workerPool.
+func (wp *workerPool) getIdleCount() int {
+	cnt := atomic.LoadInt32(&wp.idleCount)
+	return int(cnt)
+}
+
+// getCount returns the total number of workers in the workerPool.
+func (wp *workerPool) getCount() int {
+	cnt := atomic.LoadInt32(&wp.count)
 	return int(cnt)
 }

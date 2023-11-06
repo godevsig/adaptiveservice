@@ -216,6 +216,7 @@ func (ct *chanTransport) receiver() {
 								privateChan: make(chan *metaMsg, cap(tm.srcChan)),
 							}
 							ssMap[tm.srcChan] = ss
+							ss.PutVar(mq)
 							if svc.fnOnNewStream != nil {
 								lg.Debugf("%s %s on new stream %v", svc.publisherName, svc.serviceName, tm.srcChan)
 								svc.fnOnNewStream(ss)

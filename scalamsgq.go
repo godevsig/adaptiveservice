@@ -129,7 +129,7 @@ func (mq *msgQ) autoScaler() {
 		}
 		egressChan := mq.getEgressChan()
 		should := len(egressChan)/mq.qWeight + mq.residentWorkers
-		now := mq.wp.len() // idle workers
+		now := mq.wp.getIdleCount() // idle workers
 
 		k := 1
 		switch {
@@ -143,6 +143,38 @@ func (mq *msgQ) autoScaler() {
 			mq.lg.Debugf("msgq autoScaler: now %d -> should %d: worker removed", now, should)
 		}
 		time.Sleep(time.Second / time.Duration(k))
+	}
+}
+
+// MsgQInfo is the running status of the message queue
+type MsgQInfo struct {
+	NumCPU          int
+	ResidentWorkers int
+	QueueWeight     int
+	QueueLen        int
+	QueueSize       int
+	BusyWorkerNum   int
+	IdleWorkerNum   int
+}
+
+// QueryMsgQInfo gets the MsgQInfo
+type QueryMsgQInfo struct{}
+
+// Handle handles QueryMsgQInfo
+func (msg QueryMsgQInfo) Handle(stream ContextStream) (reply any) {
+	var mq *msgQ
+	stream.GetVar(&mq)
+	nCPU := runtime.NumCPU()
+	totalWorker := mq.wp.getCount()
+	idleWorker := mq.wp.getIdleCount() + 1 // ignore this worker
+	return MsgQInfo{
+		NumCPU:          nCPU,
+		ResidentWorkers: mq.residentWorkers,
+		QueueWeight:     mq.qWeight,
+		QueueLen:        len(mq.getEgressChan()),
+		QueueSize:       mq.qSize,
+		BusyWorkerNum:   totalWorker - idleWorker,
+		IdleWorkerNum:   idleWorker,
 	}
 }
 
@@ -195,4 +227,9 @@ func (mq *msgQ) getEgressChan() chan *metaKnownMsg {
 	}
 
 	return mq.egressChan
+}
+
+func init() {
+	RegisterType(QueryMsgQInfo{})
+	RegisterType(MsgQInfo{})
 }

@@ -26,8 +26,13 @@ func (s *Server) SetPublisher(publisherName string) *Server {
 //    < 0: the number of workers is fixed at residentWorkers.
 // A Server has one internal message queue, messages received from transport layer are put into
 // the queue, a number of workers get message from the queue and handle it.
-// When qWeight >= 0, the number of wokers scales automatically from residentWorkers to
-// qSizePerCore*core number/qWeight + residentWorkers.
+// The size of the message queue is qSizePerCore*core number.
+//
+// When qWeight >= 0, a worker pool is created, the number of wokers scales automatically in the pool.
+// The target number of available workers is dynamically adjusted by below formula periodically:
+//  target available workers = len(message queue)/qWeight + residentWorkers
+// The worker pool continuously adds/removes workers to follow the target.
+//
 // Be careful to set qWeight < 0, which effectively disables auto scala worker pool, which
 // in turn only uses fixed number of workers(residentWorkers). Forever blocking may occur in
 // such case, especially when residentWorkers = 1.

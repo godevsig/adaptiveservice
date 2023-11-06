@@ -46,19 +46,14 @@ func main() {
 		reverseProxy := cmd.Bool("proxy", false, "enable reverse proxy service")
 		serviceLister := cmd.Bool("lister", false, "enable service lister service")
 		registryAddr := cmd.String("registry", "", "root registry address")
-		lanBroadcastPort := cmd.String("bcast", "", "broadcast port for LAN")
+		lanBroadcastPort := cmd.String("bcast", "9923", "broadcast port for LAN")
 
 		action := func() int {
 			cmd.Parse(os.Args[2:])
-			if len(*registryAddr) == 0 {
-				panic("root registry address not set")
-			}
-			if len(*lanBroadcastPort) == 0 {
-				panic("lan broadcast port not set")
-			}
-
 			var opts []as.Option
-			opts = append(opts, as.WithRegistryAddr(*registryAddr))
+			if len(*registryAddr) != 0 {
+				opts = append(opts, as.WithRegistryAddr(*registryAddr))
+			}
 			if *debug {
 				opts = append(opts, as.WithLogger(as.LoggerAll{}))
 			}

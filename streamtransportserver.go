@@ -422,6 +422,7 @@ func (st *streamTransport) receiver() {
 					enc:         gotiny.NewEncoderWithPtr((*streamTransportMsg)(nil)),
 				}
 				ssMap[tm.chanID] = ss
+				ss.PutVar(mq)
 				if svc.fnOnNewStream != nil {
 					lg.Debugf("%s %s on new stream %v", svc.publisherName, svc.serviceName, tm.chanID)
 					svc.fnOnNewStream(ss)
