@@ -248,7 +248,7 @@ func ReadTracedMsg(token string) (string, error) {
 
 	reEmptyStruct := regexp.MustCompile(`\{.*\}`)
 	shortenMsg := func(msg string) string {
-		return reEmptyStruct.ReplaceAllString(msg, "") + "{}"
+		return reEmptyStruct.ReplaceAllLiteralString(msg, "{}")
 	}
 
 	fmt.Fprintln(&sb, "\nSummary(paste below content to http://www.plantuml.com/plantuml):")
