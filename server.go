@@ -33,6 +33,13 @@ type Server struct {
 	closed           chan struct{}
 }
 
+const (
+	// DefaultQSizePerCore is the default value for qSizePerCore
+	DefaultQSizePerCore int = 128
+	// DefaultQWeight is the default value for qWeight
+	DefaultQWeight int = 8
+)
+
 // NewServer creates a server which publishes services.
 func NewServer(options ...Option) *Server {
 	s := &Server{
@@ -40,8 +47,8 @@ func NewServer(options ...Option) *Server {
 		publisher:       "default.org",
 		errRecovers:     make(chan errorRecover, 1),
 		residentWorkers: 1,
-		qSizePerCore:    128,
-		qWeight:         16,
+		qSizePerCore:    DefaultQSizePerCore,
+		qWeight:         DefaultQWeight,
 		msgTypeCheck:    true,
 		closed:          make(chan struct{}),
 	}

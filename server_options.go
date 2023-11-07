@@ -19,10 +19,10 @@ func (s *Server) SetPublisher(publisherName string) *Server {
 //   <= 0: uses default value. Default is 1.
 //  qSizePerCore:
 //    > 0: the internal message queue size per core.
-//   <= 0: uses default value. Default is 128.
+//   <= 0: uses default value. Default is DefaultQSizePerCore.
 //  qWeight:
 //    > 0: the weight of the message queue.
-//      0: uses default value. Default is 16.
+//      0: uses default value. Default is DefaultQWeight.
 //    < 0: the number of workers is fixed at residentWorkers.
 // A Server has one internal message queue, messages received from transport layer are put into
 // the queue, a number of workers get message from the queue and handle it.
