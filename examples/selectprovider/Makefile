@@ -17,8 +17,8 @@ define do_servers
 endef
 
 runc: client ## Run client
-	@for i in `seq 100`; do (./tclient -n 100000 > /dev/null &); done
-	@sleep 10
+	@for i in `seq 100`; do (./tclient -n 100000 > /dev/null) & done
+	@sleep 3
 	@./tclient -d -m1 1 > tclient_cpacity.log &
 	@./tclient -d -m1 2 > tclient_latency.log &
 	@./tclient -d -m1 1 -m2 2 > tclient_cpacity_latency.log &
