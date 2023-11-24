@@ -1,6 +1,7 @@
 package adaptiveservice
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -357,6 +358,7 @@ type msgTraceHelper struct {
 	undelivered   *tracedMessageRecord
 	done          chan struct{}
 	failedCount   int
+	closed        bool
 }
 
 var mTraceHelper = &msgTraceHelper{done: make(chan struct{})}
@@ -414,33 +416,34 @@ func (mth *msgTraceHelper) run() error {
 		}
 	}
 	for {
-		select {
-		case tracedMsgRaw := <-mth.tracedMsgChan:
-			if tracedMsgRaw == nil {
-				return nil
-			}
-			local := tracedMsgRaw.netconn.LocalAddr()
-			remote := tracedMsgRaw.netconn.RemoteAddr()
-			tracedMsg := tracedMessageRecord{
-				tracedMsgRaw.timeStamp,
-				fmt.Sprintf("%#v", tracedMsgRaw.msg),
-				tracedMsgRaw.tracingID,
-				tracedMsgRaw.tag,
-				fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), remote.String()),
-			}
-			mth.undelivered = &tracedMsg
-			if err := deliver(); err != nil {
-				return err
-			}
+		tracedMsgRaw := <-mth.tracedMsgChan
+		if tracedMsgRaw == nil {
+			return nil
+		}
+		local := tracedMsgRaw.netconn.LocalAddr()
+		remote := tracedMsgRaw.netconn.RemoteAddr()
+		tracedMsg := tracedMessageRecord{
+			tracedMsgRaw.timeStamp,
+			fmt.Sprintf("%#v", tracedMsgRaw.msg),
+			tracedMsgRaw.tracingID,
+			tracedMsgRaw.tag,
+			fmt.Sprintf("%s: %s <--> %s", local.Network(), local.String(), remote.String()),
+		}
+		mth.undelivered = &tracedMsg
+		if err := deliver(); err != nil {
+			return err
 		}
 	}
 }
 
 func (mth *msgTraceHelper) runOnce() {
 	mth.once.Do(func() {
-		mth.tracedMsgChan = make(chan *tracedMsgRaw, 64)
+		mth.tracedMsgChan = make(chan *tracedMsgRaw, 128)
 		go func() {
-			defer close(mth.done)
+			defer func() {
+				close(mth.done)
+				mth.closed = true
+			}()
 			for {
 				err := mth.run()
 				if err == nil {
@@ -463,6 +466,15 @@ func (mth *msgTraceHelper) traceMsg(msg any, tracingID uuidInfoPtr, tag string, 
 	}
 
 	mth.runOnce()
-	mth.tracedMsgChan <- &tracedMsgRaw{time.Now(), msg, tracingID, tag, netconn}
+	if mth.closed {
+		return errors.New("Message trace helper closed")
+	}
+
+	select {
+	case mth.tracedMsgChan <- &tracedMsgRaw{time.Now(), msg, tracingID, tag, netconn}:
+	default:
+		return errors.New("Message trace helper buffer full")
+	}
+
 	return nil
 }
