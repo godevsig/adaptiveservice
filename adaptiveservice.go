@@ -57,7 +57,6 @@ import (
 	"time"
 
 	"github.com/niubaoshu/gotiny"
-	"github.com/timandy/routine"
 )
 
 // Scope is publishing and discovering scope
@@ -188,25 +187,25 @@ type LoggerAll struct{}
 
 // Debugf is Debugf
 func (LoggerAll) Debugf(format string, args ...interface{}) {
-	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), goID())
 	fmt.Printf(h+"[AS DEBUG] "+format+"\n", args...)
 }
 
 // Infof is Infof
 func (LoggerAll) Infof(format string, args ...interface{}) {
-	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), goID())
 	fmt.Printf(h+"[AS INFO] "+format+"\n", args...)
 }
 
 // Warnf is Warnf
 func (LoggerAll) Warnf(format string, args ...interface{}) {
-	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), goID())
 	fmt.Printf(h+"[AS WARN] "+format+"\n", args...)
 }
 
 // Errorf is Errorf
 func (LoggerAll) Errorf(format string, args ...interface{}) {
-	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), routine.Goid())
+	h := fmt.Sprintf("%v <<%v>> ", time.Now().Format(timeNano), goID())
 	fmt.Printf(h+"[AS ERROR] "+format+"\n", args...)
 }
 

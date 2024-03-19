@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/timandy/routine"
 )
 
 type traceFilter struct {
@@ -38,14 +37,6 @@ type uuidInfoPtr = *uuidInfo
 
 type infoPerRoutine struct {
 	tracingID uuidInfoPtr
-}
-
-var routineLocal = routine.NewThreadLocalWithInitial(func() any {
-	return &infoPerRoutine{}
-})
-
-func getRoutineLocal() *infoPerRoutine {
-	return routineLocal.Get().(*infoPerRoutine)
 }
 
 var tracedMsgList = struct {
