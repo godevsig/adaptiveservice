@@ -103,7 +103,7 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			return
 		case mm := <-mq.getEgressChan():
 			st.working()
-			mq.lg.Debugf("worker handling message: <%#v>", mm.msg)
+			//mq.lg.Debugf("worker handling message: <%#v>", mm.msg)
 			tracingID := mm.getTracingID()
 			if tracingID != nil {
 				tag := fmt.Sprintf("%s/%s@%s handler", mm.svcInfo.publisherName, mm.svcInfo.serviceName, mm.svcInfo.providerID)
@@ -113,7 +113,7 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 			}
 			getRoutineLocal().tracingID = tracingID
 			reply := mm.msg.Handle(mm.stream)
-			mq.lg.Debugf("worker handled, reply: <%#v>", reply)
+			//mq.lg.Debugf("worker handled, reply: <%#v>", reply)
 			if reply != nil {
 				mm.stream.Send(reply)
 			}

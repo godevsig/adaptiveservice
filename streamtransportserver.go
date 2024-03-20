@@ -165,7 +165,7 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	buf := net.Buffers{}
 	mainCopy := false
 	if atomic.CompareAndSwapInt32(&ss.encMainCopy, 0, 1) {
-		ss.lg.Debugf("enc main copy")
+		//ss.lg.Debugf("enc main copy")
 		mainCopy = true
 	}
 	enc := ss.enc
@@ -176,7 +176,7 @@ func (ss *streamServerStream) send(tm *streamTransportMsg) error {
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
-	ss.lg.Debugf("stream server send: tm: %#v", tm)
+	//ss.lg.Debugf("stream server send: tm: %#v", tm)
 	ss.mtx.Lock()
 	defer func() {
 		if mainCopy {
@@ -406,7 +406,7 @@ func (st *streamTransport) receiver() {
 				}()
 				dec.Decode(bufMsg, &tm)
 			}()
-			lg.Debugf("stream server receiver: tm: %#v", &tm)
+			//lg.Debugf("stream server receiver: tm: %#v", &tm)
 
 			ss := ssMap[tm.chanID]
 			if ss == nil {
@@ -454,7 +454,7 @@ func (st *streamTransport) receiver() {
 					msg:            msg.(KnownMessage),
 					transportFeats: tfs,
 				}
-				lg.Debugf("stream enqueue message <%#v>", mm.msg)
+				//lg.Debugf("stream enqueue message <%#v>", mm.msg)
 				mq.putMetaMsg(mm)
 			} else {
 				ss.privateChan <- &metaMsg{msg, tfs}

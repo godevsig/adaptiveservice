@@ -241,7 +241,7 @@ func (ct *chanTransport) receiver() {
 								msg:            msg.(KnownMessage),
 								transportFeats: tfs,
 							}
-							lg.Debugf("chan enqueue message <%#v>", mm.msg)
+							//lg.Debugf("chan enqueue message <%#v>", mm.msg)
 							mq.putMetaMsg(mm)
 						} else {
 							ss.privateChan <- &metaMsg{msg, tfs}

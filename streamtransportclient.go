@@ -114,7 +114,7 @@ func (conn *streamConnection) receiver() {
 			}()
 			dec.Decode(bufMsg, &tm)
 		}()
-		lg.Debugf("stream client receiver: tm: %#v", &tm)
+		//lg.Debugf("stream client receiver: tm: %#v", &tm)
 
 		if tm.chanID != 0 {
 			func() {
@@ -173,7 +173,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	buf := net.Buffers{}
 	mainCopy := false
 	if atomic.CompareAndSwapInt32(&cs.encMainCopy, 0, 1) {
-		lg.Debugf("enc main copy")
+		//lg.Debugf("enc main copy")
 		mainCopy = true
 	}
 	enc := cs.enc
@@ -184,7 +184,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)
-	lg.Debugf("stream client send: tm: %#v", &tm)
+	//lg.Debugf("stream client send: tm: %#v", &tm)
 	cs.conn.Lock()
 	defer func() {
 		if mainCopy {
