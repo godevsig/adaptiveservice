@@ -13,7 +13,8 @@ import (
 type Client struct {
 	*conf
 	providerSelectionMethods []ProviderSelectionMethod
-	discoverTimeout          int // in seconds
+	discoverTimeout          int  // in seconds
+	checkIntervalMS          uint // in milliseconds
 	deepCopy                 bool
 }
 
@@ -22,6 +23,7 @@ func NewClient(options ...Option) *Client {
 	c := &Client{
 		conf:            newConf(),
 		discoverTimeout: -1,
+		checkIntervalMS: 1000,
 	}
 
 	for _, o := range options {
@@ -263,6 +265,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		defer close(connections)
 		found := 0
 		timeout := c.discoverTimeout
+		checkIntervalMS := time.Duration(c.checkIntervalMS) * time.Millisecond
 		for found == 0 {
 			if found += findWithinOS(); found == expect {
 				break
@@ -274,7 +277,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 				break
 			}
 			c.lg.Debugf("waiting for service: %s_%s", publisher, service)
-			time.Sleep(time.Second)
+			time.Sleep(checkIntervalMS)
 			timeout--
 		}
 	}()

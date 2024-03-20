@@ -49,6 +49,19 @@ func (c *Client) SetDiscoverTimeout(timeout int) *Client {
 	return c
 }
 
+// SetCheckInterval set the check interval in milliseconds when discovering the wanted service.
+// Discover procedure continuously checks the availability of the wanted service, it waits interval
+// milliseconds before next checking.
+//
+// Default value is 1000, minimum value is 10.
+func (c *Client) SetCheckInterval(interval uint) *Client {
+	if interval < 10 {
+		interval = 10
+	}
+	c.checkIntervalMS = interval
+	return c
+}
+
 // SetDeepCopy sets the client to deep copy the message before sending it out.
 // This option is only useful for process scope where by default the server
 // can modify the message that the client owns because server and client in
