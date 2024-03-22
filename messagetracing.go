@@ -282,9 +282,10 @@ func ReadTracedMsg(token string) (string, error) {
 
 func getTracingID(msg any) uuidInfoPtr {
 	// try to carry on with the tracingID from current goroutine context
-	tracingID := getRoutineLocal().tracingID
-	if tracingID != nil {
-		return tracingID
+	if rLocalInfo := getRoutineLocal(); rLocalInfo != nil {
+		if tracingID := rLocalInfo.tracingID; tracingID != nil {
+			return tracingID
+		}
 	}
 
 	// try if it is one of the target msg types
@@ -329,7 +330,7 @@ func getTracingID(msg any) uuidInfoPtr {
 		}
 	}
 
-	tracingID = &uuidInfo{tcptr.id, tcptr.seqNum}
+	tracingID := &uuidInfo{tcptr.id, tcptr.seqNum}
 	atomic.AddUint32(&tcptr.seqNum, 1)
 	return tracingID
 }

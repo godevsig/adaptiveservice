@@ -111,7 +111,9 @@ func (mq *msgQ) worker(done <-chan struct{}, st status) {
 					mq.lg.Warnf("message tracing on server handler error: %v", err)
 				}
 			}
-			getRoutineLocal().tracingID = tracingID
+			if rLocalInfo := getRoutineLocal(); rLocalInfo != nil {
+				rLocalInfo.tracingID = tracingID
+			}
 			reply := mm.msg.Handle(mm.stream)
 			//mq.lg.Debugf("worker handled, reply: <%#v>", reply)
 			if reply != nil {

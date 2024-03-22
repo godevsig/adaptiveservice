@@ -2,10 +2,8 @@
 
 package adaptiveservice
 
-var fakeInfo infoPerRoutine
-
 func getRoutineLocal() *infoPerRoutine {
-	return &fakeInfo
+	return nil
 }
 
 func goID() int64 {

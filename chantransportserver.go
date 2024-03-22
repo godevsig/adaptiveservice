@@ -103,7 +103,9 @@ func (ss *chanServerStream) Recv(msgPtr interface{}) (err error) {
 				ss.lg.Warnf("message tracing on server recv error: %v", err)
 			}
 		}
-		getRoutineLocal().tracingID = tracingID
+		if rLocalInfo := getRoutineLocal(); rLocalInfo != nil {
+			rLocalInfo.tracingID = tracingID
+		}
 
 		if err, ok := msg.(error); ok {
 			return err
