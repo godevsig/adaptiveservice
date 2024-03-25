@@ -54,7 +54,7 @@ func (c *Client) SetDiscoverTimeout(timeout int) *Client {
 // milliseconds before next checking.
 //
 // Default value is 1000, minimum value is 10.
-func (c *Client) SetCheckInterval(interval uint) *Client {
+func (c *Client) SetCheckInterval(interval int) *Client {
 	if interval < 10 {
 		interval = 10
 	}

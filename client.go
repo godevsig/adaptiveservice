@@ -13,8 +13,8 @@ import (
 type Client struct {
 	*conf
 	providerSelectionMethods []ProviderSelectionMethod
-	discoverTimeout          int  // in seconds
-	checkIntervalMS          uint // in milliseconds
+	discoverTimeout          int // in seconds
+	checkIntervalMS          int // in milliseconds
 	deepCopy                 bool
 }
 
@@ -264,7 +264,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 	go func() {
 		defer close(connections)
 		found := 0
-		timeout := c.discoverTimeout
+		timeout := c.discoverTimeout * 1000 / c.checkIntervalMS
 		checkIntervalMS := time.Duration(c.checkIntervalMS) * time.Millisecond
 		for found == 0 {
 			if found += findWithinOS(); found == expect {
