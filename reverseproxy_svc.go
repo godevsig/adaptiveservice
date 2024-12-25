@@ -19,7 +19,9 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	chanServerConn := make(chan net.Conn)
 
 	onServerConnection := func(netconn Netconn) bool {
-		chanServerConn <- netconn.(net.Conn)
+		if chanServerConn != nil {
+			chanServerConn <- netconn.(net.Conn)
+		}
 		return true
 	}
 
@@ -37,9 +39,10 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 	var proxytran *streamTransport
 	go func() {
 		if err := stream.Recv(nil); err != nil {
-			s.lg.Debugf("service cmdconn read lost, closing its proxy")
+			s.lg.Infof("service cmdconn read lost: %v, closing its proxy", err)
 			reversetran.close()
 			close(chanServerConn)
+			chanServerConn = nil
 			if proxytran != nil {
 				proxytran.close()
 			}
@@ -50,9 +53,13 @@ func (msg *proxyRegServiceInWAN) Handle(stream ContextStream) (reply interface{}
 		clientConn := netconn.(net.Conn)
 		s.lg.Debugf("reverse proxy: starting for client: %s", clientConn.RemoteAddr().String())
 		if err := stream.Send(port); err != nil {
-			s.lg.Debugf("service cmdconn write lost, closing its proxy")
+			s.lg.Infof("service cmdconn write lost: %v, closing its proxy", err)
 			reversetran.close()
 			proxytran.close()
+			clientConn.Close()
+			return true
+		}
+		if chanServerConn == nil {
 			clientConn.Close()
 			return true
 		}
