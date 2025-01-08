@@ -1,6 +1,9 @@
 package adaptiveservice
 
 import (
+	"encoding/binary"
+	"fmt"
+	"io"
 	"net"
 	"time"
 )
@@ -82,6 +85,41 @@ func (to *timeouter) timeoutChan() (timeoutChan chan struct{}) {
 		time.AfterFunc(to.d, func() { timeoutChan <- struct{}{} })
 	}
 	return
+}
+
+// for clients
+func handshakeWithServer(netconn net.Conn) (info string, err error) {
+	buf := net.Buffers{}
+	bufSize := make([]byte, 2)
+	marker := fmt.Sprintf("Adaptiveservice Spec Version %s", specVersion)
+	bufMsg := []byte(marker)
+	binary.BigEndian.PutUint16(bufSize, uint16(len(bufMsg)))
+	buf = append(buf, bufSize, bufMsg)
+	// |size(2bytes)|marker(variable size)|
+	if _, err := buf.WriteTo(netconn); err != nil {
+		return "", fmt.Errorf("failed to write marker: %w", err)
+	}
+	return "Local " + marker, nil
+}
+
+// for servers
+func handshakeWithClient(netconn net.Conn) (info string, err error) {
+	bufSize := make([]byte, 2)
+	if _, err := io.ReadFull(netconn, bufSize); err != nil {
+		return "", fmt.Errorf("failed to read marker size: %w", err)
+	}
+	size := binary.BigEndian.Uint16(bufSize)
+	bufMsg := make([]byte, size)
+	if _, err := io.ReadFull(netconn, bufMsg); err != nil {
+		return "", fmt.Errorf("failed to read marker: %w", err)
+	}
+	marker := string(bufMsg)
+	var specVer string
+	if _, err := fmt.Sscanf(marker, "Adaptiveservice Spec Version %s", &specVer); err != nil {
+		return "", fmt.Errorf("failed to parse SPEC version: %w", err)
+	}
+	// ToDo: check specVer with specVersion
+	return fmt.Sprintf("Adaptiveservice Spec Version: Local %s, Remote %s", specVersion, specVer), nil
 }
 
 func init() {

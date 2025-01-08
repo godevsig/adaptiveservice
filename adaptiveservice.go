@@ -59,6 +59,12 @@ import (
 	"github.com/niubaoshu/gotiny"
 )
 
+// History:
+// "1.0": add client and server handshake immediately after netconnection is established.
+//        This will be incompatible with previous versions, servers will not decline and
+//        close the connection with client if the handshake can not be made.
+const specVersion = "1.0"
+
 // Scope is publishing and discovering scope
 type Scope uint16
 

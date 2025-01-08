@@ -49,7 +49,13 @@ func (c *Client) newStreamConnection(network string, addr string) (*streamConnec
 			return nil, err
 		}
 	}
-	c.lg.Debugf("stream connection established: %s -> %s", netconn.LocalAddr().String(), addr)
+
+	info, err := handshakeWithServer(netconn)
+	if err != nil {
+		netconn.Close()
+		return nil, fmt.Errorf("failed to handshake with server %s: %w", netconn.RemoteAddr().String(), err)
+	}
+	c.lg.Debugf("stream connection established: %s -> %s with info: %s", netconn.LocalAddr().String(), addr, info)
 
 	conn := &streamConnection{
 		owner:   c,

@@ -314,14 +314,18 @@ func (st *streamTransport) receiver() {
 	svcInfo := &serviceInfo{svc.providerID, svc.publisherName, svc.serviceName}
 
 	go func() {
-		rootRegistryIP, _, _ := net.SplitHostPort(svc.s.registryAddr)
-		pinged := false
+		ping := true
 		if lnr.Addr().Network() == "unix" {
-			pinged = true
+			ping = false
 		}
 		if svc.publisherName == BuiltinPublisher && svc.serviceName == "rootRegistry" {
-			pinged = true
+			ping = false
 		}
+		rootRegistryIP, _, _ := net.SplitHostPort(svc.s.registryAddr)
+		if len(rootRegistryIP) == 0 {
+			ping = false
+		}
+
 		for {
 			netconn, err := lnr.Accept()
 			if err != nil {
@@ -332,11 +336,11 @@ func (st *streamTransport) receiver() {
 				}
 				continue
 			}
-			if !pinged {
+			if ping {
 				host, _, _ := net.SplitHostPort(netconn.RemoteAddr().String())
 				if host == rootRegistryIP {
 					netconn.Close()
-					pinged = true
+					ping = false
 					lg.Debugf("ping from root registry")
 					continue
 				}
@@ -346,7 +350,14 @@ func (st *streamTransport) receiver() {
 	}()
 
 	handleConn := func(netconn net.Conn) {
-		lg.Debugf("%s %s new stream connection from: %s", svc.publisherName, svc.serviceName, netconn.RemoteAddr().String())
+		info, err := handshakeWithClient(netconn)
+		if err != nil {
+			netconn.Close()
+			lg.Warnf("failed to handshake with client %s: %v", netconn.RemoteAddr().String(), err)
+			return
+		}
+		lg.Debugf("%s %s new stream connection from: %s with info: %s",
+			svc.publisherName, svc.serviceName, netconn.RemoteAddr().String(), info)
 		if svc.fnOnConnect != nil {
 			lg.Debugf("%s %s on connect", svc.publisherName, svc.serviceName)
 			if svc.fnOnConnect(netconn) {
