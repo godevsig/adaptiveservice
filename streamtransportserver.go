@@ -353,7 +353,10 @@ func (st *streamTransport) receiver() {
 		info, err := handshakeWithClient(netconn)
 		if err != nil {
 			netconn.Close()
-			lg.Warnf("failed to handshake with client %s: %v", netconn.RemoteAddr().String(), err)
+			if !errors.Is(err, io.EOF) {
+				lg.Warnf("%s %s failed to handshake with client %s: %v",
+					svc.publisherName, svc.serviceName, netconn.RemoteAddr().String(), err)
+			}
 			return
 		}
 		lg.Debugf("%s %s new stream connection from: %s with info: %s",
