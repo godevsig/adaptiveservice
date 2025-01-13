@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"reflect"
 	"strings"
@@ -187,6 +188,9 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 		enc = enc.Copy()
 	}
 	bufMsg := enc.Encode(&tm)
+	if len(bufMsg) > math.MaxUint32 {
+		return ErrMsgTooLarge
+	}
 	bufSize := make([]byte, 4)
 	binary.BigEndian.PutUint32(bufSize, uint32(len(bufMsg)))
 	buf = append(buf, bufSize, bufMsg)

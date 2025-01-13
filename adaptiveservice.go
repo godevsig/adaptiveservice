@@ -113,6 +113,8 @@ var (
 	// ErrRecvTimeout is an error where no data was received within
 	// specified duration.
 	ErrRecvTimeout = errors.New("receive timeout")
+	// ErrMsgTooLarge is an error when sending too large message.
+	ErrMsgTooLarge = errors.New("message size exceeds uint32")
 )
 
 type errServiceNotFound struct {
