@@ -188,7 +188,7 @@ func (cs *streamClientStream) Send(msg interface{}) error {
 		enc = enc.Copy()
 	}
 	bufMsg := enc.Encode(&tm)
-	if len(bufMsg) > math.MaxUint32 {
+	if len(bufMsg) > math.MaxInt32 {
 		return ErrMsgTooLarge
 	}
 	bufSize := make([]byte, 4)
