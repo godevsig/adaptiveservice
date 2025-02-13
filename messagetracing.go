@@ -385,7 +385,7 @@ func (mth *msgTraceHelper) close() {
 }
 
 func (mth *msgTraceHelper) run() error {
-	c := NewClient(WithLogger(mth.lg)).SetDiscoverTimeout(3)
+	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(mth.lg)).SetDiscoverTimeout(1)
 	conn := <-c.Discover(BuiltinPublisher, SrvMessageTracing)
 	if conn == nil {
 		return ErrServiceNotFound(BuiltinPublisher, SrvMessageTracing)
@@ -443,7 +443,7 @@ func (mth *msgTraceHelper) runOnce() {
 				}
 				mth.failedCount++
 				if mth.failedCount >= 3 {
-					mth.lg.Errorf("shutdown msgTraceHelper after %d continouse errors", mth.failedCount)
+					mth.lg.Errorf("Stopping msgTraceHelper after %d continuous errors", mth.failedCount)
 					return
 				}
 				mth.lg.Warnf("msgTraceHelper error: %v", err)
