@@ -385,7 +385,7 @@ func (mth *msgTraceHelper) close() {
 }
 
 func (mth *msgTraceHelper) run() error {
-	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(mth.lg)).SetDiscoverTimeout(1)
+	c := NewClient(WithLogger(mth.lg)).SetDiscoverTimeout(3)
 	conn := <-c.Discover(BuiltinPublisher, SrvMessageTracing)
 	if conn == nil {
 		return ErrServiceNotFound(BuiltinPublisher, SrvMessageTracing)
