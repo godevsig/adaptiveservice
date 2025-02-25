@@ -54,53 +54,19 @@ func (pi *providerScoreInfo) String() string {
 //
 // Only one service(identified by publisher name and service name) can exist in
 // ScopeProcess and ScopeOS, but in ScopeLAN and ScopeWAN there can be many systems
-// providing the same service, each systeam(called provider) has an unique provider ID.
+// providing the same service, each system(called provider) has an unique provider ID.
 //
 // Use providerIDs to select target providers in ScopeLAN or ScopeWAN,
 // if no provider id presents, discover searches scopes by distance that is
 // in the order of ScopeProcess, ScopeOS, ScopeLAN, ScopeWAN, and returns
 // only one connection towards the found service which may have been randomly selected
-// if more than one services were found.
+// if more than one services were found. See SetProviderSelectionMethod() for more methods.
 //
 // If any of publisher or service or provider ids contains "*", discover will return
 // all currently available connections of the wanted service(s). Make sure to close
 // ALL the connections it returns after use.
 func (c *Client) Discover(publisher, service string, providerIDs ...string) <-chan Connection {
 	connections := make(chan Connection)
-
-	has := func(target string) bool {
-		if len(providerIDs) == 0 { // match all
-			return true
-		}
-		if len(target) == 0 {
-			return false
-		}
-		// str can be wildcard
-		for _, str := range providerIDs {
-			if wildcardMatch(str, target) {
-				return true
-			}
-		}
-		return false
-	}
-
-	expect := 1
-	if strings.Contains(publisher+service, "*") {
-		expect = -1
-	}
-	if len(providerIDs) != 0 {
-		expect = len(providerIDs)
-		if strings.Contains(strings.Join(providerIDs, " "), "*") {
-			expect = -1
-		}
-	}
-	if len(c.providerID) == 0 && c.scope&ScopeNetwork != 0 {
-		providerID, err := GetSelfProviderID()
-		if err != nil {
-			providerID = "NA"
-		}
-		c.providerID = providerID
-	}
 
 	serviceList := make(map[string]struct{})
 	addToserviceList := func(publisherName, serviceName, providerID string) bool {
@@ -112,10 +78,7 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		return true
 	}
 
-	findWithinOS := func() (found int) {
-		if !has(c.providerID) {
-			return 0
-		}
+	findWithinOS := func(expect int) (found int) {
 		if c.scope&ScopeProcess == ScopeProcess {
 			c.lg.Debugf("finding %s_%s in ScopeProcess", publisher, service)
 			ccts := c.lookupServiceChan(publisher, service)
@@ -291,14 +254,39 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		return found
 	}
 
+	expect := 1
+	if strings.Contains(publisher+service, "*") {
+		expect = -1
+	}
+	// do not search within OS when user specified none-wildcard providerIDs
+	searchWithinOS := true
+	if len(providerIDs) != 0 {
+		if strings.Contains(strings.Join(providerIDs, " "), "*") {
+			expect = -1
+		} else {
+			expect = len(providerIDs)
+			searchWithinOS = false
+		}
+		if len(c.providerID) == 0 && c.scope&ScopeNetwork != 0 {
+			providerID, err := GetSelfProviderID()
+			if err != nil {
+				providerID = "NA"
+			}
+			c.providerID = providerID
+		}
+	}
+
 	go func() {
 		defer close(connections)
+		checkIntervalMS := time.Duration(c.checkIntervalMS) * time.Millisecond
+
 		found := 0
 		timeout := c.discoverTimeout * 1000 / c.checkIntervalMS
-		checkIntervalMS := time.Duration(c.checkIntervalMS) * time.Millisecond
 		for found == 0 {
-			if found += findWithinOS(); found == expect {
-				break
+			if searchWithinOS {
+				if found += findWithinOS(expect - found); found == expect {
+					break
+				}
 			}
 			if found += findNetwork(expect - found); found == expect {
 				break
