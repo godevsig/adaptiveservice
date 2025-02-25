@@ -136,7 +136,7 @@ func (s *Server) init() error {
 	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
 		if len(s.providerID) != 0 {
 			s.lg.Infof("user specified provider ID: %s", s.providerID)
-		} else if id, err := discoverProviderID(s.lg); err != nil {
+		} else if id, err := GetSelfProviderID(); err != nil {
 			if len(s.providerID) == 0 {
 				s.providerID = genID()
 			}

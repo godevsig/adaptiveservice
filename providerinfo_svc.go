@@ -22,14 +22,23 @@ func (s *Server) publishProviderInfoService() error {
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvProviderInfo, knownMsgs)
 }
 
-func discoverProviderID(lg Logger) (id string, err error) {
-	c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(lg)).SetDiscoverTimeout(0)
+var cachedSelfProviderID string
+
+// GetSelfProviderID gets self provider ID and cache it for further use
+func GetSelfProviderID() (id string, err error) {
+	if len(cachedSelfProviderID) != 0 {
+		return cachedSelfProviderID, nil
+	}
+	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, SrvProviderInfo)
 	if conn == nil {
 		return "", ErrServiceNotFound(BuiltinPublisher, SrvProviderInfo)
 	}
 	defer conn.Close()
 	err = conn.SendRecv(&ReqProviderInfo{}, &id)
+	if err == nil {
+		cachedSelfProviderID = id
+	}
 	return
 }
 

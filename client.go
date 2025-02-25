@@ -93,13 +93,23 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		if strings.Contains(strings.Join(providerIDs, " "), "*") {
 			expect = -1
 		}
-		if len(c.providerID) == 0 {
-			providerID, err := discoverProviderID(c.lg)
-			if err != nil {
-				providerID = "NA"
-			}
-			c.providerID = providerID
+	}
+	if len(c.providerID) == 0 && c.scope&ScopeNetwork != 0 {
+		providerID, err := GetSelfProviderID()
+		if err != nil {
+			providerID = "NA"
 		}
+		c.providerID = providerID
+	}
+
+	serviceList := make(map[string]struct{})
+	addToserviceList := func(publisherName, serviceName, providerID string) bool {
+		key := publisherName + serviceName + providerID
+		if _, has := serviceList[key]; has {
+			return false
+		}
+		serviceList[key] = struct{}{}
+		return true
 	}
 
 	findWithinOS := func() (found int) {
@@ -110,6 +120,9 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			c.lg.Debugf("finding %s_%s in ScopeProcess", publisher, service)
 			ccts := c.lookupServiceChan(publisher, service)
 			for _, cct := range ccts {
+				if svc := cct.ct.svc; !addToserviceList(svc.publisherName, svc.serviceName, "self") {
+					continue
+				}
 				connections <- cct.newConnection()
 				c.lg.Debugf("channel transport connected")
 				found++
@@ -122,6 +135,9 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			c.lg.Debugf("finding %s_%s in ScopeOS", publisher, service)
 			addrs := lookupServiceUDS(publisher, service)
 			for _, addr := range addrs {
+				if pName, sName := fromUDSAddr(addr); !addToserviceList(pName, sName, "self") {
+					continue
+				}
 				conn, err := c.newUDSConnection(addr)
 				if err != nil {
 					c.lg.Errorf("dial " + addr + " failed")
@@ -238,10 +254,24 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 			connect(addrs)
 		}
 
+		getAddrs := func(serviceInfos []*ServiceInfo) (addrs []string) {
+			for _, si := range serviceInfos {
+				pID := si.ProviderID
+				if pID == c.providerID {
+					pID = "self"
+				}
+				if !addToserviceList(si.Publisher, si.Service, pID) {
+					continue
+				}
+				addrs = append(addrs, si.Addr)
+			}
+			return
+		}
+
 		if found != expect && c.scope&ScopeLAN == ScopeLAN {
 			c.lg.Debugf("finding %s_%s in ScopeLAN", publisher, service)
-			addrs := c.lookupServiceLAN(publisher, service, providerIDs...)
-			selectAndConnect(addrs)
+			svcInfos := c.lookupServiceLAN(publisher, service, providerIDs...)
+			selectAndConnect(getAddrs(svcInfos))
 		}
 		if found != expect && c.scope&ScopeWAN == ScopeWAN {
 			c.lg.Debugf("finding %s_%s in ScopeWAN", publisher, service)
@@ -254,8 +284,8 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 				c.lg.Debugf("discovered registry address: %s", addr)
 			}
 			if c.registryAddr != "NA" {
-				addrs := c.lookupServiceWAN(publisher, service, providerIDs...)
-				selectAndConnect(addrs)
+				svcInfos := c.lookupServiceWAN(publisher, service, providerIDs...)
+				selectAndConnect(getAddrs(svcInfos))
 			}
 		}
 		return found

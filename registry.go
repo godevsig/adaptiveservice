@@ -24,8 +24,20 @@ var (
 	}{table: make(map[string]*chanTransport)}
 )
 
+func toPublisherServiceName(publisherName, serviceName string) string {
+	return publisherName + "_" + serviceName
+}
+
+func fromPublisherServiceName(name string) (publisherName, serviceName string) {
+	strs := strings.Split(name, "_")
+	if len(strs) != 2 {
+		panic("Bad PublisherServiceName")
+	}
+	return strs[0], strs[1]
+}
+
 func regServiceChan(publisherName, serviceName string, ct *chanTransport) {
-	name := publisherName + "_" + serviceName
+	name := toPublisherServiceName(publisherName, serviceName)
 	chanRegistry.Lock()
 	defer chanRegistry.Unlock()
 	if _, has := chanRegistry.table[name]; has {
@@ -35,14 +47,14 @@ func regServiceChan(publisherName, serviceName string, ct *chanTransport) {
 }
 
 func delServiceChan(publisherName, serviceName string) {
-	name := publisherName + "_" + serviceName
+	name := toPublisherServiceName(publisherName, serviceName)
 	chanRegistry.Lock()
 	delete(chanRegistry.table, name)
 	chanRegistry.Unlock()
 }
 
 func serviceNamesInProcess(publisherName, serviceName string) (names []string) {
-	name := publisherName + "_" + serviceName
+	name := toPublisherServiceName(publisherName, serviceName)
 	if strings.Contains(name, "*") {
 		chanRegistry.RLock()
 		for ctname := range chanRegistry.table {
@@ -68,8 +80,8 @@ func serviceNamesInProcess(publisherName, serviceName string) (names []string) {
 func queryServiceProcess(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
 	names := serviceNamesInProcess(publisherName, serviceName)
 	for _, name := range names {
-		strs := strings.Split(name, "_")
-		sInfo := &ServiceInfo{strs[0], strs[1], "self", "internal"}
+		pName, sName := fromPublisherServiceName(name)
+		sInfo := &ServiceInfo{pName, sName, "self", "internal"}
 		serviceInfos = append(serviceInfos, sInfo)
 	}
 	return
@@ -90,7 +102,12 @@ func (c *Client) lookupServiceChan(publisherName, serviceName string) (ccts []*c
 }
 
 func toUDSAddr(publisherName, serviceName string) (addr string) {
-	return udsRegistry + publisherName + "_" + serviceName + ".sock"
+	return udsRegistry + toPublisherServiceName(publisherName, serviceName) + ".sock"
+}
+
+func fromUDSAddr(addr string) (publisherName, serviceName string) {
+	name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
+	return fromPublisherServiceName(name)
 }
 
 func serviceNamesInOS(publisherName, serviceName string) (names []string) {
@@ -107,7 +124,7 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 	}
 
 	distinctEntires := make(map[string]struct{})
-	tName := publisherName + "_" + serviceName
+	tName := toPublisherServiceName(publisherName, serviceName)
 	//skip first line
 	b.ReadString('\n')
 	for {
@@ -120,7 +137,8 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 		if len(fs) == 8 {
 			addr := fs[7]
 			if strings.Contains(addr, udsRegistry) {
-				name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
+				pName, sName := fromUDSAddr(addr)
+				name := toPublisherServiceName(pName, sName)
 				// there can be multiple entires with the same name
 				if _, has := distinctEntires[name]; has {
 					continue
@@ -140,8 +158,8 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
 	names := serviceNamesInOS(publisherName, serviceName)
 	for _, name := range names {
-		strs := strings.Split(name, "_")
-		sInfo := &ServiceInfo{strs[0], strs[1], "self", udsRegistry + name + ".sock"}
+		pName, sName := fromPublisherServiceName(name)
+		sInfo := &ServiceInfo{pName, sName, "self", toUDSAddr(pName, sName)}
 		serviceInfos = append(serviceInfos, sInfo)
 	}
 	return
@@ -151,7 +169,8 @@ func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceI
 func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
 	names := serviceNamesInOS(publisherName, serviceName)
 	for _, name := range names {
-		addrs = append(addrs, udsRegistry+name+".sock")
+		pName, sName := fromPublisherServiceName(name)
+		addrs = append(addrs, toUDSAddr(pName, sName))
 	}
 	return
 }
@@ -189,8 +208,7 @@ func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos
 }
 
 // support wildcard
-func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
-	serviceInfos := queryServiceLAN(publisherName, serviceName, c.lg)
+func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (serviceInfos []*ServiceInfo) {
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
@@ -202,9 +220,11 @@ func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs
 		}
 		return false
 	}
-	for _, provider := range serviceInfos {
-		if has(provider.ProviderID) {
-			addrs = append(addrs, provider.Addr)
+
+	svcInfoAvailable := queryServiceLAN(publisherName, serviceName, c.lg)
+	for _, si := range svcInfoAvailable {
+		if has(si.ProviderID) {
+			serviceInfos = append(serviceInfos, si)
 		}
 	}
 	return
@@ -357,18 +377,18 @@ type cmdLANQuery struct {
 }
 
 func (r *registryLAN) registerServiceInLAN(publisher, service, port string) {
-	name := publisher + "_" + service
+	name := toPublisherServiceName(publisher, service)
 	r.cmdChan <- &cmdLANRegister{name, port}
 }
 
 func (r *registryLAN) deleteServiceInLAN(publisher, service string) {
-	name := publisher + "_" + service
+	name := toPublisherServiceName(publisher, service)
 	r.cmdChan <- &cmdLANDelete{name}
 }
 
 // support wildcard
 func (r *registryLAN) queryServiceInLAN(publisher, service string) []*ServiceInfo {
-	name := publisher + "_" + service
+	name := toPublisherServiceName(publisher, service)
 	r.Lock()
 	if len(r.serviceInfoCache) > 1000 {
 		r.serviceInfoCache = make(map[string]*serviceInfoTime)
@@ -456,13 +476,13 @@ func (r *registryLAN) run() {
 	getServiceInfos := func(cmd *cmdLANQuery) {
 		var serviceInfos []*ServiceInfo
 		walkProviders := func(prvds *providers, name string) {
-			ss := strings.Split(name, "_")
+			pName, sName := fromPublisherServiceName(name)
 			for pID, pInfo := range prvds.table {
 				if time.Since(pInfo.timeStamp) > 10*time.Minute {
 					delete(prvds.table, pID)
 					continue
 				}
-				svcInfo := &ServiceInfo{Publisher: ss[0], Service: ss[1], ProviderID: pID, Addr: pInfo.addr}
+				svcInfo := &ServiceInfo{Publisher: pName, Service: sName, ProviderID: pID, Addr: pInfo.addr}
 				serviceInfos = append(serviceInfos, svcInfo)
 			}
 		}
@@ -607,7 +627,7 @@ func queryServiceWAN(registryAddr, publisherName, serviceName string, lg Logger)
 }
 
 // support wildcard
-func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (addrs []string) {
+func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (serviceInfos []*ServiceInfo) {
 	has := func(target string) bool {
 		if len(providerIDs) == 0 { // match all
 			return true
@@ -620,10 +640,10 @@ func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs
 		return false
 	}
 
-	serviceInfos := queryServiceWAN(c.registryAddr, publisherName, serviceName, c.lg)
-	for _, provider := range serviceInfos {
-		if has(provider.ProviderID) {
-			addrs = append(addrs, provider.Addr)
+	svcInfoAvailable := queryServiceWAN(c.registryAddr, publisherName, serviceName, c.lg)
+	for _, si := range svcInfoAvailable {
+		if has(si.ProviderID) {
+			serviceInfos = append(serviceInfos, si)
 		}
 	}
 	return
@@ -658,10 +678,10 @@ func (rr *rootRegistry) walkProviders(name string, fn func(service, pID string, 
 
 	if strings.Contains(name, "*") {
 		rr.RLock()
-		for service, pmap := range rr.serviceMap {
+		for psName, pmap := range rr.serviceMap {
 			rr.RUnlock()
-			if wildcardMatch(name, service) {
-				walkProviderMap(service, pmap)
+			if wildcardMatch(name, psName) {
+				walkProviderMap(psName, pmap)
 			}
 			rr.RLock()
 		}
@@ -720,7 +740,7 @@ func (msg *regServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 		return err
 	}
 
-	name := msg.publisher + "_" + msg.service
+	name := toPublisherServiceName(msg.publisher, msg.service)
 	rr.Lock()
 	pmap, has := rr.serviceMap[name]
 	if !has {
@@ -748,7 +768,7 @@ type delServiceInWAN struct {
 
 func (msg *delServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	rr := stream.GetContext().(*rootRegistry)
-	name := msg.publisher + "_" + msg.service
+	name := toPublisherServiceName(msg.publisher, msg.service)
 	rr.RLock()
 	pmap, has := rr.serviceMap[name]
 	rr.RUnlock()
@@ -763,16 +783,16 @@ func (msg *delServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	return nil
 }
 
-func makeServiceInfo(service, pID string, pInfo *providerInfo) *ServiceInfo {
+func makeServiceInfo(publisherServiceName, pID string, pInfo *providerInfo) *ServiceInfo {
 	addr := pInfo.addr
 	if pInfo.proxied {
 		addr += "P"
 	}
 	svcInfo := &ServiceInfo{ProviderID: pID, Addr: addr}
-	if len(service) != 0 {
-		ss := strings.Split(service, "_")
-		svcInfo.Publisher = ss[0]
-		svcInfo.Service = ss[1]
+	if len(publisherServiceName) != 0 {
+		pName, sName := fromPublisherServiceName(publisherServiceName)
+		svcInfo.Publisher = pName
+		svcInfo.Service = sName
 	}
 	return svcInfo
 }
@@ -786,11 +806,11 @@ type queryServiceInWAN struct {
 
 func (msg *queryServiceInWAN) Handle(stream ContextStream) (reply interface{}) {
 	rr := stream.GetContext().(*rootRegistry)
-	name := msg.publisher + "_" + msg.service
+	name := toPublisherServiceName(msg.publisher, msg.service)
 	var serviceInfos []*ServiceInfo
 
-	rr.walkProviders(name, func(service, pID string, pInfo *providerInfo) (remove bool) {
-		serviceInfos = append(serviceInfos, makeServiceInfo(service, pID, pInfo))
+	rr.walkProviders(name, func(publisherServiceName, pID string, pInfo *providerInfo) (remove bool) {
+		serviceInfos = append(serviceInfos, makeServiceInfo(publisherServiceName, pID, pInfo))
 		return false
 	})
 
@@ -810,18 +830,18 @@ func (s *Server) registryCheckSaver(rr *rootRegistry) {
 		time.Sleep(time.Minute)
 
 		var serviceInfos []*ServiceInfo
-		rr.walkProviders("*", func(service, pID string, pInfo *providerInfo) (remove bool) {
+		rr.walkProviders("*", func(publisherServiceName, pID string, pInfo *providerInfo) (remove bool) {
 			t := time.Now()
 			if err := pingService(pInfo.addr); err != nil {
 				if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
-					s.lg.Infof("removing provider ID %s: %v from service %s", pID, pInfo, service)
+					s.lg.Infof("removing provider ID %s: %v from service %s", pID, pInfo, publisherServiceName)
 					return true
 				}
 			} else {
 				// update time stamp if ping succeeded
 				pInfo.timeStamp = t
 			}
-			serviceInfos = append(serviceInfos, makeServiceInfo(service, pID, pInfo))
+			serviceInfos = append(serviceInfos, makeServiceInfo(publisherServiceName, pID, pInfo))
 			return false
 		})
 
@@ -866,7 +886,7 @@ func (s *Server) startRootRegistry(port string) error {
 			if err != nil {
 				break
 			}
-			name := publisher + "_" + service
+			name := toPublisherServiceName(publisher, service)
 			pmap := rr.serviceMap[name]
 			if pmap == nil {
 				pmap = &providerMap{providers: make(map[string]*providerInfo)}
