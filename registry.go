@@ -478,7 +478,7 @@ func (r *registryLAN) run() {
 		walkProviders := func(prvds *providers, name string) {
 			pName, sName := fromPublisherServiceName(name)
 			for pID, pInfo := range prvds.table {
-				if time.Since(pInfo.timeStamp) > 10*time.Minute {
+				if time.Since(pInfo.timeStamp) > 5*time.Minute {
 					delete(prvds.table, pID)
 					continue
 				}
@@ -826,6 +826,8 @@ func init() {
 
 func (s *Server) registryCheckSaver(rr *rootRegistry) {
 	s.lg.Infof("root registry checksaver running")
+	servicesRecord := filepath.Join(asTmpDir, "services.record")
+	updatingFile := servicesRecord + ".updating"
 	for {
 		time.Sleep(time.Minute)
 
@@ -833,7 +835,7 @@ func (s *Server) registryCheckSaver(rr *rootRegistry) {
 		rr.walkProviders("*", func(publisherServiceName, pID string, pInfo *providerInfo) (remove bool) {
 			t := time.Now()
 			if err := pingService(pInfo.addr); err != nil {
-				if t.After(pInfo.timeStamp.Add(15 * time.Minute)) {
+				if t.After(pInfo.timeStamp.Add(5 * time.Minute)) {
 					s.lg.Infof("removing provider ID %s: %v from service %s", pID, pInfo, publisherServiceName)
 					return true
 				}
@@ -844,9 +846,6 @@ func (s *Server) registryCheckSaver(rr *rootRegistry) {
 			serviceInfos = append(serviceInfos, makeServiceInfo(publisherServiceName, pID, pInfo))
 			return false
 		})
-
-		servicesRecord := filepath.Join(asTmpDir, "services.record")
-		updatingFile := servicesRecord + ".updating"
 
 		f, err := os.Create(updatingFile)
 		if err != nil {
