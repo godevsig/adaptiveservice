@@ -59,7 +59,7 @@ func serviceNamesInProcess(publisherName, serviceName string) (names []string) {
 		chanRegistry.RLock()
 		for ctname := range chanRegistry.table {
 			chanRegistry.RUnlock()
-			if wildcardMatch(name, ctname) {
+			if WildcardMatch(name, ctname) {
 				names = append(names, ctname)
 			}
 			chanRegistry.RLock()
@@ -144,7 +144,7 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 					continue
 				}
 				distinctEntires[name] = struct{}{}
-				if wildcardMatch(tName, name) {
+				if WildcardMatch(tName, name) {
 					names = append(names, name)
 				}
 			}
@@ -214,7 +214,7 @@ func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs
 			return true
 		}
 		for _, str := range providerIDs {
-			if wildcardMatch(str, target) {
+			if WildcardMatch(str, target) {
 				return true
 			}
 		}
@@ -489,7 +489,7 @@ func (r *registryLAN) run() {
 
 		if strings.Contains(cmd.name, "*") {
 			for name, prvds := range serviceCache {
-				if wildcardMatch(cmd.name, name) {
+				if WildcardMatch(cmd.name, name) {
 					walkProviders(prvds, name)
 				}
 			}
@@ -558,7 +558,7 @@ func (r *registryLAN) run() {
 			case *queryInLAN:
 				if strings.Contains(msg.name, "*") {
 					for name, lsi := range localServiceTable {
-						if wildcardMatch(msg.name, name) {
+						if WildcardMatch(msg.name, name) {
 							replyTo(&foundInLAN{name, r.s.providerID, lsi.port}, raddr)
 						}
 					}
@@ -633,7 +633,7 @@ func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs
 			return true
 		}
 		for _, str := range providerIDs {
-			if wildcardMatch(str, target) {
+			if WildcardMatch(str, target) {
 				return true
 			}
 		}
@@ -680,7 +680,7 @@ func (rr *rootRegistry) walkProviders(name string, fn func(service, pID string, 
 		rr.RLock()
 		for psName, pmap := range rr.serviceMap {
 			rr.RUnlock()
-			if wildcardMatch(name, psName) {
+			if WildcardMatch(name, psName) {
 				walkProviderMap(psName, pmap)
 			}
 			rr.RLock()

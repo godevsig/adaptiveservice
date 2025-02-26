@@ -358,32 +358,51 @@ func GetRegisteredTypeByName(name string) reflect.Type {
 	return nil
 }
 
-// test if pattern matches str
+// WildcardMatch checks if str matches the pattern with "*" as a wildcard
 //   "*" matches all
 //  "*bar*" matches bar, foobar, or foobarabc
 //  "foo*abc*" matches foobarabc, foobarabc123, or fooabc
-func wildcardMatch(pattern, str string) bool {
-	if len(pattern) == 0 {
-		return false
+func WildcardMatch(pattern, str string) bool {
+	if pattern == "*" {
+		return true
 	}
-	strs := strings.Split(pattern, "*")
-	var pos, index int
-	if index = strings.Index(str, strs[0]); index != 0 {
-		return false
+	if pattern == "" {
+		return str == ""
 	}
-	end := strs[len(strs)-1]
-	if index = strings.LastIndex(str, end); index+len(end) != len(str) {
-		return false
+
+	parts := strings.Split(pattern, "*")
+	if len(parts) == 1 {
+		return pattern == str
 	}
-	for i, substr := range strs {
-		if i == 0 || i == len(strs)-1 || len(substr) == 0 {
+
+	// Match the first segment (if not empty)
+	begin := parts[0]
+	if begin != "" {
+		if !strings.HasPrefix(str, begin) {
+			return false
+		}
+		str = str[len(begin):]
+	}
+
+	// Match the last segment (if not empty)
+	end := parts[len(parts)-1]
+	if end != "" {
+		if !strings.HasSuffix(str, end) {
+			return false
+		}
+		str = str[:len(str)-len(end)]
+	}
+
+	// Match the middle segments
+	for _, part := range parts[1 : len(parts)-1] {
+		if part == "" {
 			continue
 		}
-		index = strings.Index(str[pos:], substr)
+		index := strings.Index(str, part)
 		if index == -1 {
 			return false
 		}
-		pos += index + len(substr)
+		str = str[index+len(part):]
 	}
 	return true
 }

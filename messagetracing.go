@@ -324,7 +324,7 @@ func getTracingID(msg any) uuidInfoPtr {
 		}
 		for _, filter := range tcptr.filters {
 			value := rv.FieldByName(filter.field)
-			if !wildcardMatch(filter.pattern, fmt.Sprintf("%v", value)) {
+			if !WildcardMatch(filter.pattern, fmt.Sprintf("%v", value)) {
 				return nil
 			}
 		}
