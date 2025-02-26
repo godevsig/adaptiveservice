@@ -204,6 +204,7 @@ func ReadTracedMsg(token string) (string, error) {
 	var allRecord []*tracedMessageRecord
 	for conn := range connChan {
 		records := []*tracedMessageRecord{}
+		conn.SetRecvTimeout(time.Second * 10)
 		conn.SendRecv(&readTracedMsg{&uuidInfo{id, uint32(seqNum)}}, &records)
 		if len(records) != 0 {
 			allRecord = append(allRecord, records...)
