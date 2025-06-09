@@ -9,4 +9,4 @@ require (
 	github.com/timandy/routine v1.1.3
 )
 
-replace github.com/niubaoshu/gotiny => github.com/godevsig/gotiny v0.0.4-0.20210913173728-083dd4b72177
+replace github.com/niubaoshu/gotiny => github.com/godevsig/gotiny v0.0.4-0.20250609020402-bcea04b6dccb
