@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -37,6 +38,9 @@ func (svc *service) newUDSTransport() (*streamTransport, error) {
 	lnr, err := net.Listen("unix", addr)
 	if err != nil {
 		return nil, err
+	}
+	if !udsIsAnonymous() {
+		os.Chmod(addr, 0777) // allow other local users to dial
 	}
 
 	st := makeStreamTransport(svc, lnr)
@@ -116,12 +120,14 @@ func (st *streamTransport) close() {
 	st.closed = nil
 	close(closed)
 	svc := st.svc
-	svc.s.lg.Debugf("stream transport %s closing", st.lnr.Addr().String())
+	lnrAddr := st.lnr.Addr()
+	svc.s.lg.Debugf("stream transport %s closing", lnrAddr.String())
 	st.lnr.Close()
 	if st.reverseProxyConn != nil {
 		st.reverseProxyConn.Close()
 	}
-	if st.lnr.Addr().Network() == "unix" {
+	if lnrAddr.Network() == "unix" {
+		os.Remove(lnrAddr.String())
 		return
 	}
 	if svc.scope&ScopeLAN == ScopeLAN {
