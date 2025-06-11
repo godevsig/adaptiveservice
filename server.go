@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"reflect"
@@ -96,6 +97,26 @@ func (s *Server) init() error {
 	s.mq = newMsgQ(s.residentWorkers, s.qSizePerCore, s.qWeight, s.lg)
 	s.addCloser(s.mq)
 
+	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
+		if id, err := GetSelfProviderID(); err != nil {
+			if len(s.providerID) == 0 {
+				s.providerID = genID()
+			}
+			if err := s.publishProviderInfoService(); err != nil {
+				return err
+			}
+			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
+		} else {
+			s.lg.Infof("discovered provider ID: %s", id)
+			if len(s.providerID) == 0 {
+				s.providerID = id
+			}
+			if s.providerID != id {
+				return fmt.Errorf("provider ID mismatch: user specified %s, discovered %s", s.providerID, id)
+			}
+		}
+	}
+
 	if s.scope&ScopeLAN == ScopeLAN {
 		s.lg.Infof("configuring server in local network scope")
 		c := NewClient(WithScope(ScopeProcess|ScopeOS), WithLogger(s.lg)).SetDiscoverTimeout(0)
@@ -131,23 +152,6 @@ func (s *Server) init() error {
 		} else {
 			s.registryAddr = addr
 			s.lg.Infof("discovered root registry address: %s", addr)
-		}
-	}
-
-	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
-		if len(s.providerID) != 0 {
-			s.lg.Infof("user specified provider ID: %s", s.providerID)
-		} else if id, err := GetSelfProviderID(); err != nil {
-			if len(s.providerID) == 0 {
-				s.providerID = genID()
-			}
-			if err := s.publishProviderInfoService(); err != nil {
-				return err
-			}
-			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
-		} else {
-			s.providerID = id
-			s.lg.Infof("discovered provider ID: %s", s.providerID)
 		}
 	}
 
