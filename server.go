@@ -22,6 +22,7 @@ type Server struct {
 	serviceLister    bool
 	ipObserver       bool
 	msgTracer        bool
+	useNamedUDS      bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
 	residentWorkers  int

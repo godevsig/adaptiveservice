@@ -34,12 +34,12 @@ func makeStreamTransport(svc *service, lnr net.Listener) *streamTransport {
 }
 
 func (svc *service) newUDSTransport() (*streamTransport, error) {
-	addr := toUDSAddr(svc.publisherName, svc.serviceName)
+	addr := toUDSAddr(svc.publisherName, svc.serviceName, svc.s.useNamedUDS)
 	lnr, err := net.Listen("unix", addr)
 	if err != nil {
 		return nil, err
 	}
-	if !udsIsAnonymous() {
+	if svc.s.useNamedUDS {
 		os.Chmod(addr, 0777) // allow other local users to dial
 	}
 
@@ -127,7 +127,9 @@ func (st *streamTransport) close() {
 		st.reverseProxyConn.Close()
 	}
 	if lnrAddr.Network() == "unix" {
-		os.Remove(lnrAddr.String())
+		if svc.s.useNamedUDS {
+			os.Remove(lnrAddr.String())
+		}
 		return
 	}
 	if svc.scope&ScopeLAN == ScopeLAN {

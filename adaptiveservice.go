@@ -123,7 +123,7 @@ type errServiceNotFound struct {
 }
 
 func (e errServiceNotFound) Error() string {
-	return "service not found: " + toPublisherServiceName(e.publisher,e.service)
+	return "service not found: " + toPublisherServiceName(e.publisher, e.service)
 }
 
 // ErrServiceNotFound returns an error that no wanted service was found
@@ -408,6 +408,7 @@ func WildcardMatch(pattern, str string) bool {
 }
 
 func init() {
+	os.MkdirAll(asTmpDir, 0755)
 	rand.Seed(time.Now().UnixNano())
 	// basic types
 	RegisterType(int(0))

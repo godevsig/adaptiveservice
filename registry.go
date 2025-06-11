@@ -16,17 +16,17 @@ import (
 	"github.com/niubaoshu/gotiny"
 )
 
+const (
+	udsRegistryAnon = "@adaptiveservice/"
+	udsRegistryDir  = asTmpDir + "/sockets/"
+)
+
 var (
-	udsRegistry  = "@adaptiveservice/"
 	chanRegistry = struct {
 		sync.RWMutex
 		table map[string]*chanTransport
 	}{table: make(map[string]*chanTransport)}
 )
-
-func udsIsAnonymous() bool {
-	return udsRegistry[0] == '@'
-}
 
 func toPublisherServiceName(publisherName, serviceName string) string {
 	return publisherName + "_" + serviceName
@@ -105,69 +105,79 @@ func (c *Client) lookupServiceChan(publisherName, serviceName string) (ccts []*c
 	return
 }
 
-func toUDSAddr(publisherName, serviceName string) (addr string) {
+func toUDSAddr(publisherName, serviceName string, useNamedUDS bool) (addr string) {
+	udsRegistry := udsRegistryAnon
+	if useNamedUDS {
+		udsRegistry = udsRegistryDir
+	}
 	return udsRegistry + toPublisherServiceName(publisherName, serviceName) + ".sock"
 }
 
 func fromUDSAddr(addr string) (publisherName, serviceName string) {
-	name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
+	baseName := filepath.Base(addr)
+	name := strings.TrimSuffix(baseName, ".sock")
 	return fromPublisherServiceName(name)
 }
 
-func serviceNamesInOS(publisherName, serviceName string) (names []string) {
+// support wildcard
+func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
 	tName := toPublisherServiceName(publisherName, serviceName)
-	if udsIsAnonymous() {
-		f, err := os.Open("/proc/net/unix")
-		if err != nil {
-			return nil
-		}
-		defer f.Close()
 
-		var b bytes.Buffer
-		_, err = b.ReadFrom(f)
-		if err != nil {
-			return nil
-		}
+	f, err := os.Open("/proc/net/unix")
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
 
-		distinctEntires := make(map[string]struct{})
-		//skip first line
-		b.ReadString('\n')
-		for {
-			line, err := b.ReadString('\n')
-			if err != nil {
-				break
-			}
-			//0000000000000000: 00000002 00000000 00010000 0001 01 10156659 @adaptiveservice/publisherName_serviceName.sock
-			fs := strings.Fields(line)
-			if len(fs) == 8 {
-				addr := fs[7]
-				if strings.Contains(addr, udsRegistry) {
-					name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
-					// there can be multiple entires with the same name
-					if _, has := distinctEntires[name]; has {
-						continue
-					}
-					distinctEntires[name] = struct{}{}
-					if WildcardMatch(tName, name) {
-						names = append(names, name)
-					}
+	var b bytes.Buffer
+	_, err = b.ReadFrom(f)
+	if err != nil {
+		return nil
+	}
+
+	distinctEntires := make(map[string]struct{})
+	//skip first line
+	b.ReadString('\n')
+	for {
+		line, err := b.ReadString('\n')
+		if err != nil {
+			break
+		}
+		//0000000000000000: 00000002 00000000 00010000 0001 01 10156659 @adaptiveservice/publisherName_serviceName.sock
+		fs := strings.Fields(line)
+		if len(fs) == 8 {
+			addr := fs[7]
+			if strings.Contains(addr, udsRegistryAnon) {
+				name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistryAnon), ".sock")
+				// there can be multiple entires with the same name
+				if _, has := distinctEntires[name]; has {
+					continue
 				}
-			}
-		}
-	} else {
-		if strings.Contains(tName, "*") {
-			sockets, _ := filepath.Glob(udsRegistry + "*.sock")
-			for _, addr := range sockets {
-				name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistry), ".sock")
+				distinctEntires[name] = struct{}{}
 				if WildcardMatch(tName, name) {
-					names = append(names, name)
+					addrs = append(addrs, addr)
 				}
 			}
-		} else {
-			if _, err := os.Stat(toUDSAddr(publisherName, serviceName)); os.IsNotExist(err) {
-				return
+		}
+	}
+
+	if !strings.Contains(tName, "*") {
+		// found in anonymous uds
+		if len(addrs) != 0 {
+			return
+		}
+		addr := toUDSAddr(publisherName, serviceName, true)
+		if _, err := os.Stat(addr); os.IsNotExist(err) {
+			return
+		}
+		addrs = append(addrs, addr)
+	} else {
+		sockets, _ := filepath.Glob(udsRegistryDir + "*.sock")
+		for _, addr := range sockets {
+			name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistryDir), ".sock")
+			if WildcardMatch(tName, name) {
+				addrs = append(addrs, addr)
 			}
-			names = append(names, tName)
 		}
 	}
 
@@ -176,21 +186,11 @@ func serviceNamesInOS(publisherName, serviceName string) (names []string) {
 
 // support wildcard
 func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
-	names := serviceNamesInOS(publisherName, serviceName)
-	for _, name := range names {
-		pName, sName := fromPublisherServiceName(name)
-		sInfo := &ServiceInfo{pName, sName, "self", toUDSAddr(pName, sName)}
+	addrs := lookupServiceUDS(publisherName, serviceName)
+	for _, addr := range addrs {
+		pName, sName := fromUDSAddr(addr)
+		sInfo := &ServiceInfo{pName, sName, "self", addr}
 		serviceInfos = append(serviceInfos, sInfo)
-	}
-	return
-}
-
-// support wildcard
-func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
-	names := serviceNamesInOS(publisherName, serviceName)
-	for _, name := range names {
-		pName, sName := fromPublisherServiceName(name)
-		addrs = append(addrs, toUDSAddr(pName, sName))
 	}
 	return
 }
@@ -931,14 +931,4 @@ func (s *Server) startRootRegistry(port string) error {
 
 	go s.registryCheckSaver(rr)
 	return nil
-}
-
-func init() {
-	udsDir := asTmpDir + "/sockets/"
-	// if udsDir exists, use named Unix Domain Socket
-	if fi, err := os.Stat(udsDir); err == nil && fi.IsDir() {
-		udsRegistry = udsDir
-	} else {
-		os.MkdirAll(asTmpDir, 0755)
-	}
 }
