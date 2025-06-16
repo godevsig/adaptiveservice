@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -34,12 +35,20 @@ func makeStreamTransport(svc *service, lnr net.Listener) *streamTransport {
 }
 
 func (svc *service) newUDSTransport() (*streamTransport, error) {
-	addr := toUDSAddr(svc.publisherName, svc.serviceName, svc.s.useNamedUDS)
+	addr := toUDSAddr(svc.publisherName, svc.serviceName, svc.useNamedUDS, svc.providerID)
+	if svc.useNamedUDS {
+		dir := filepath.Dir(addr)
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			os.Chmod(dir, 0777)
+		} else {
+			os.MkdirAll(dir, 0777)
+		}
+	}
 	lnr, err := net.Listen("unix", addr)
 	if err != nil {
 		return nil, err
 	}
-	if svc.s.useNamedUDS {
+	if svc.useNamedUDS {
 		os.Chmod(addr, 0777) // allow other local users to dial
 	}
 
@@ -127,8 +136,10 @@ func (st *streamTransport) close() {
 		st.reverseProxyConn.Close()
 	}
 	if lnrAddr.Network() == "unix" {
-		if svc.s.useNamedUDS {
+		if svc.useNamedUDS {
 			os.Remove(lnrAddr.String())
+			// try to remove the dir if it is empty
+			os.Remove(filepath.Dir(lnrAddr.String()))
 		}
 		return
 	}

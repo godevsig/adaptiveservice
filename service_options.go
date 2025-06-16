@@ -37,3 +37,13 @@ func OnDisconnectFunc(fn func(Netconn)) ServiceOption {
 		svc.fnOnDisconnect = fn
 	}
 }
+
+// UseNamedUDS sets the service to use named Unix Domain Socket for Scope OS.
+// The socket path will be
+// /tmp/adaptiveservice/sockets/$providerID/$publisher_$service.sock.
+// Default is using anonymous UDS.
+func UseNamedUDS() ServiceOption {
+	return func(svc *service) {
+		svc.useNamedUDS = true
+	}
+}

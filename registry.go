@@ -105,10 +105,13 @@ func (c *Client) lookupServiceChan(publisherName, serviceName string) (ccts []*c
 	return
 }
 
-func toUDSAddr(publisherName, serviceName string, useNamedUDS bool) (addr string) {
+func toUDSAddr(publisherName, serviceName string, useNamedUDS bool, id string) (addr string) {
 	udsRegistry := udsRegistryAnon
 	if useNamedUDS {
 		udsRegistry = udsRegistryDir
+		if len(id) != 0 {
+			udsRegistry = udsRegistry + id + "/"
+		}
 	}
 	return udsRegistry + toPublisherServiceName(publisherName, serviceName) + ".sock"
 }
@@ -120,7 +123,7 @@ func fromUDSAddr(addr string) (publisherName, serviceName string) {
 }
 
 // support wildcard
-func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
+func lookupServiceUDSAnon(publisherName, serviceName string) (addrs []string) {
 	tName := toPublisherServiceName(publisherName, serviceName)
 
 	f, err := os.Open("/proc/net/unix")
@@ -161,22 +164,73 @@ func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
 		}
 	}
 
-	if !strings.Contains(tName, "*") {
-		// found in anonymous uds
-		if len(addrs) != 0 {
-			return
+	return
+}
+
+func matchProvider(providerIDs []string, target string) bool {
+	if len(providerIDs) == 0 { // match all
+		return true
+	}
+	for _, pid := range providerIDs {
+		if WildcardMatch(pid, target) {
+			return true
 		}
-		addr := toUDSAddr(publisherName, serviceName, true)
+	}
+	return false
+}
+
+// support wildcard
+func lookupServiceUDSDir(publisherName, serviceName string, providerIDs ...string) (serviceInfos []*ServiceInfo) {
+	entries, err := os.ReadDir(udsRegistryDir)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+
+	tName := toPublisherServiceName(publisherName, serviceName)
+	wildcardName := strings.Contains(tName, "*")
+	if !wildcardName && len(providerIDs) == 0 {
+		providerID, err := GetSelfProviderID()
+		if err != nil {
+			providerID = "NA"
+		}
+		addr := toUDSAddr(publisherName, serviceName, true, providerID)
 		if _, err := os.Stat(addr); os.IsNotExist(err) {
 			return
 		}
-		addrs = append(addrs, addr)
-	} else {
-		sockets, _ := filepath.Glob(udsRegistryDir + "*.sock")
-		for _, addr := range sockets {
-			name := strings.TrimSuffix(strings.TrimPrefix(addr, udsRegistryDir), ".sock")
-			if WildcardMatch(tName, name) {
-				addrs = append(addrs, addr)
+		svcInfo := &ServiceInfo{publisherName, serviceName, "self", addr}
+		serviceInfos = append(serviceInfos, svcInfo)
+		return
+	}
+
+	for _, entry := range entries {
+		eName := entry.Name()
+		if entry.IsDir() {
+			providerID := eName
+			if !matchProvider(providerIDs, providerID) {
+				continue
+			}
+			if !wildcardName {
+				addr := toUDSAddr(publisherName, serviceName, true, providerID)
+				if _, err := os.Stat(addr); err == nil {
+					svcInfo := &ServiceInfo{publisherName, serviceName, providerID, addr}
+					serviceInfos = append(serviceInfos, svcInfo)
+				}
+				continue
+			}
+			sockets, _ := filepath.Glob(udsRegistryDir + providerID + "/*.sock")
+			for _, addr := range sockets {
+				name := strings.TrimSuffix(filepath.Base(addr), ".sock")
+				if WildcardMatch(tName, name) {
+					pName, sName := fromPublisherServiceName(name)
+					svcInfo := &ServiceInfo{pName, sName, providerID, addr}
+					serviceInfos = append(serviceInfos, svcInfo)
+				}
+			}
+		} else if strings.HasSuffix(eName, ".sock") {
+			pName, sName := fromUDSAddr(eName)
+			if WildcardMatch(tName, toPublisherServiceName(pName, sName)) {
+				svcInfo := &ServiceInfo{pName, sName, "self", udsRegistryDir + eName}
+				serviceInfos = append(serviceInfos, svcInfo)
 			}
 		}
 	}
@@ -186,12 +240,13 @@ func lookupServiceUDS(publisherName, serviceName string) (addrs []string) {
 
 // support wildcard
 func queryServiceOS(publisherName, serviceName string) (serviceInfos []*ServiceInfo) {
-	addrs := lookupServiceUDS(publisherName, serviceName)
+	addrs := lookupServiceUDSAnon(publisherName, serviceName)
 	for _, addr := range addrs {
 		pName, sName := fromUDSAddr(addr)
 		sInfo := &ServiceInfo{pName, sName, "self", addr}
 		serviceInfos = append(serviceInfos, sInfo)
 	}
+	serviceInfos = append(serviceInfos, lookupServiceUDSDir(publisherName, serviceName)...)
 	return
 }
 
@@ -229,21 +284,9 @@ func queryServiceLAN(publisherName, serviceName string, lg Logger) (serviceInfos
 
 // support wildcard
 func (c *Client) lookupServiceLAN(publisherName, serviceName string, providerIDs ...string) (serviceInfos []*ServiceInfo) {
-	has := func(target string) bool {
-		if len(providerIDs) == 0 { // match all
-			return true
-		}
-		for _, str := range providerIDs {
-			if WildcardMatch(str, target) {
-				return true
-			}
-		}
-		return false
-	}
-
 	svcInfoAvailable := queryServiceLAN(publisherName, serviceName, c.lg)
 	for _, si := range svcInfoAvailable {
-		if has(si.ProviderID) {
+		if matchProvider(providerIDs, si.ProviderID) {
 			serviceInfos = append(serviceInfos, si)
 		}
 	}
@@ -648,21 +691,9 @@ func queryServiceWAN(registryAddr, publisherName, serviceName string, lg Logger)
 
 // support wildcard
 func (c *Client) lookupServiceWAN(publisherName, serviceName string, providerIDs ...string) (serviceInfos []*ServiceInfo) {
-	has := func(target string) bool {
-		if len(providerIDs) == 0 { // match all
-			return true
-		}
-		for _, str := range providerIDs {
-			if WildcardMatch(str, target) {
-				return true
-			}
-		}
-		return false
-	}
-
 	svcInfoAvailable := queryServiceWAN(c.registryAddr, publisherName, serviceName, c.lg)
 	for _, si := range svcInfoAvailable {
-		if has(si.ProviderID) {
+		if matchProvider(providerIDs, si.ProviderID) {
 			serviceInfos = append(serviceInfos, si)
 		}
 	}

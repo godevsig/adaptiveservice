@@ -78,8 +78,24 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		return true
 	}
 
+	searchSelf := true
+	// user specified providers
+	if len(providerIDs) != 0 {
+		// we need to know self ID
+		if len(c.providerID) == 0 && c.scope&ScopeNetwork != 0 {
+			providerID, err := GetSelfProviderID()
+			if err != nil {
+				providerID = "NA"
+			}
+			c.providerID = providerID
+		}
+		if len(c.providerID) != 0 && !matchProvider(providerIDs, c.providerID) {
+			searchSelf = false
+		}
+	}
+
 	findWithinOS := func(expect int) (found int) {
-		if c.scope&ScopeProcess == ScopeProcess {
+		if searchSelf && c.scope&ScopeProcess == ScopeProcess {
 			c.lg.Debugf("finding %s_%s in ScopeProcess", publisher, service)
 			ccts := c.lookupServiceChan(publisher, service)
 			for _, cct := range ccts {
@@ -96,17 +112,39 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		}
 		if c.scope&ScopeOS == ScopeOS {
 			c.lg.Debugf("finding %s_%s in ScopeOS", publisher, service)
-			addrs := lookupServiceUDS(publisher, service)
-			for _, addr := range addrs {
-				if pName, sName := fromUDSAddr(addr); !addToserviceList(pName, sName, "self") {
+			if searchSelf {
+				addrs := lookupServiceUDSAnon(publisher, service)
+				for _, addr := range addrs {
+					if pName, sName := fromUDSAddr(addr); !addToserviceList(pName, sName, "self") {
+						continue
+					}
+					conn, err := c.newUDSConnection(addr)
+					if err != nil {
+						c.lg.Errorf("dial " + addr + " failed")
+					} else {
+						connections <- conn
+						c.lg.Debugf("unix domain socket connected to: %s", addr)
+						found++
+						if found == expect {
+							return
+						}
+					}
+				}
+			}
+
+			c.lg.Debugf("finding %s_%s in ScopeOS Dir", publisher, service)
+			// uds dir may be shared, so we consider it not fully "self"
+			svcInfos := lookupServiceUDSDir(publisher, service, providerIDs...)
+			for _, si := range svcInfos {
+				if !addToserviceList(si.Publisher, si.Service, si.ProviderID) {
 					continue
 				}
-				conn, err := c.newUDSConnection(addr)
+				conn, err := c.newUDSConnection(si.Addr)
 				if err != nil {
-					c.lg.Errorf("dial " + addr + " failed")
+					c.lg.Errorf("dial " + si.Addr + " failed")
 				} else {
 					connections <- conn
-					c.lg.Debugf("unix domain socket connected to: %s", addr)
+					c.lg.Debugf("unix domain socket connected to: %s", si.Addr)
 					found++
 					if found == expect {
 						return
@@ -254,26 +292,15 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		return found
 	}
 
+	// default is to search only one service from all possible scopes
 	expect := 1
-	if strings.Contains(publisher+service, "*") {
-		expect = -1
-	}
-	// do not search within OS when user specified none-wildcard providerIDs
-	searchWithinOS := true
 	if len(providerIDs) != 0 {
-		if strings.Contains(strings.Join(providerIDs, " "), "*") {
-			expect = -1
-		} else {
-			expect = len(providerIDs)
-			searchWithinOS = false
-		}
-		if len(c.providerID) == 0 && c.scope&ScopeNetwork != 0 {
-			providerID, err := GetSelfProviderID()
-			if err != nil {
-				providerID = "NA"
-			}
-			c.providerID = providerID
-		}
+		// expect available services at most the number of explicit providers
+		expect = len(providerIDs)
+	}
+	// search all wildcard matched services from all possible scopes
+	if strings.Contains(publisher+service, "*") || strings.Contains(strings.Join(providerIDs, " "), "*") {
+		expect = -1
 	}
 
 	go func() {
@@ -283,10 +310,8 @@ func (c *Client) Discover(publisher, service string, providerIDs ...string) <-ch
 		found := 0
 		timeout := c.discoverTimeout * 1000 / c.checkIntervalMS
 		for found == 0 {
-			if searchWithinOS {
-				if found += findWithinOS(expect - found); found == expect {
-					break
-				}
+			if found += findWithinOS(expect - found); found == expect {
+				break
 			}
 			if found += findNetwork(expect - found); found == expect {
 				break

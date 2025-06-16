@@ -1,5 +1,7 @@
 package adaptiveservice
 
+import "errors"
+
 // SrvProviderInfo : service providerInfo
 const SrvProviderInfo = "providerInfo"
 
@@ -22,15 +24,22 @@ func (s *Server) publishProviderInfoService() error {
 	return s.publish(ScopeProcess|ScopeOS, BuiltinPublisher, SrvProviderInfo, knownMsgs)
 }
 
-var cachedSelfProviderID string
+var (
+	cachedSelfProviderID string
+	nestedCall           int
+)
 
 // GetSelfProviderID gets self provider ID and cache it for further use
 func GetSelfProviderID() (id string, err error) {
 	if len(cachedSelfProviderID) != 0 {
 		return cachedSelfProviderID, nil
 	}
+	if nestedCall++; nestedCall > 1 {
+		return "", errors.New("nested call to GetSelfProviderID")
+	}
 	c := NewClient(WithScope(ScopeProcess | ScopeOS)).SetDiscoverTimeout(0)
 	conn := <-c.Discover(BuiltinPublisher, SrvProviderInfo)
+	nestedCall = 0
 	if conn == nil {
 		return "", ErrServiceNotFound(BuiltinPublisher, SrvProviderInfo)
 	}

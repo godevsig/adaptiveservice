@@ -1,7 +1,5 @@
 package adaptiveservice
 
-import "os"
-
 // SetPublisher declares the publisher of the server, which
 // is usually an organization name.
 // The default value of publisherName is "default.org".
@@ -96,18 +94,5 @@ func (s *Server) EnableIPObserver() *Server {
 // collect local traced messages.
 func (s *Server) EnableMessageTracer() *Server {
 	s.msgTracer = true
-	return s
-}
-
-// UseNamedUDS sets the server to use named Unix Domain Socket under
-// /tmp/adaptiveservice/sockets for Scope OS.
-// Default is anonymous UDS.
-func (s *Server) UseNamedUDS() *Server {
-	if fi, err := os.Stat(udsRegistryDir); err == nil && fi.IsDir() {
-		os.Chmod(udsRegistryDir, 0777)
-	} else {
-		os.MkdirAll(udsRegistryDir, 0777)
-	}
-	s.useNamedUDS = true
 	return s
 }

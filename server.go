@@ -23,7 +23,6 @@ type Server struct {
 	serviceLister    bool
 	ipObserver       bool
 	msgTracer        bool
-	useNamedUDS      bool
 	errRecovers      chan errorRecover
 	mq               *msgQ
 	residentWorkers  int
@@ -87,6 +86,27 @@ func genID() string {
 	return id
 }
 
+func (s *Server) initProviderID() error {
+	if id, err := GetSelfProviderID(); err != nil {
+		if len(s.providerID) == 0 {
+			s.providerID = genID()
+		}
+		if err := s.publishProviderInfoService(); err != nil {
+			return err
+		}
+		s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
+	} else {
+		s.lg.Infof("discovered provider ID: %s", id)
+		if len(s.providerID) == 0 {
+			s.providerID = id
+		}
+		if s.providerID != id {
+			return fmt.Errorf("provider ID mismatch: user specified %s, discovered %s", s.providerID, id)
+		}
+	}
+	return nil
+}
+
 func (s *Server) init() error {
 	if s.initialized {
 		return nil
@@ -98,22 +118,8 @@ func (s *Server) init() error {
 	s.addCloser(s.mq)
 
 	if s.scope&ScopeLAN == ScopeLAN || s.scope&ScopeWAN == ScopeWAN {
-		if id, err := GetSelfProviderID(); err != nil {
-			if len(s.providerID) == 0 {
-				s.providerID = genID()
-			}
-			if err := s.publishProviderInfoService(); err != nil {
-				return err
-			}
-			s.lg.Infof("provider info service started with provider ID: %s", s.providerID)
-		} else {
-			s.lg.Infof("discovered provider ID: %s", id)
-			if len(s.providerID) == 0 {
-				s.providerID = id
-			}
-			if s.providerID != id {
-				return fmt.Errorf("provider ID mismatch: user specified %s, discovered %s", s.providerID, id)
-			}
+		if err := s.initProviderID(); err != nil {
+			return err
 		}
 	}
 
@@ -267,6 +273,7 @@ type service struct {
 	knownMsgTypes   map[reflect.Type]struct{}
 	s               *Server
 	scope           Scope
+	useNamedUDS     bool
 	fnOnNewStream   func(Context)                 // called on new stream accepted
 	fnOnStreamClose func(Context)                 // called on stream closed
 	fnOnConnect     func(Netconn) (takeOver bool) // called on new connection established
@@ -315,6 +322,14 @@ func (s *Server) publish(scope Scope, publisherName, serviceName string, knownMe
 	svc := newService()
 	for _, opt := range options {
 		opt(svc)
+	}
+
+	// named uds maybe shared, we need providerID
+	if svc.useNamedUDS {
+		if err := s.initProviderID(); err != nil {
+			return err
+		}
+		svc.providerID = s.providerID
 	}
 
 	if scope&ScopeProcess == ScopeProcess {
