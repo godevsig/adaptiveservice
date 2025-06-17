@@ -449,6 +449,7 @@ func init() {
 	// error types
 	RegisterType(errors.New(""))
 	RegisterType(fmt.Errorf("%w", io.EOF))
+	RegisterType(errServiceNotFound{})
 }
 
 // Dummy annotation marking that the value x escapes,
