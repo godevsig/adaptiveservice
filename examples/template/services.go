@@ -15,10 +15,8 @@ func (svc *service) onNewStream(ctx as.Context) {
 	ctx.SetContext(svc)
 }
 
-// RunService runs the service.
-func RunService(opts []as.Option) error {
-	s := as.NewServer(opts...).SetPublisher("example")
-
+// PublishTemplateService publishes the service
+func PublishTemplateService(s *as.Server) error {
 	svc := &service{info: "Hello"}
 	if err := s.Publish("template",
 		knownMsgs,
@@ -26,7 +24,5 @@ func RunService(opts []as.Option) error {
 	); err != nil {
 		return err
 	}
-
-	// ctrl+c to exit
-	return s.Serve()
+	return nil
 }

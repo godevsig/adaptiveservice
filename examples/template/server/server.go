@@ -18,9 +18,16 @@ func main() {
 		opts = append(opts, as.WithLogger(as.LoggerAll{}))
 	}
 
-	err := template.RunService(opts)
-	if err != nil {
+	s := as.NewServer(opts...).SetPublisher("example")
+	if err := template.PublishTemplateService(s); err != nil {
 		fmt.Println(err)
+		return
+	}
+
+	// ctrl+c to exit
+	if err := s.Serve(); err != nil {
+		fmt.Println(err)
+		return
 	}
 	fmt.Println("done")
 }
