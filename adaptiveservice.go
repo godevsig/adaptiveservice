@@ -322,6 +322,9 @@ func RegisterType(i interface{}) {
 	//gotiny.Register(i)
 	rt := reflect.TypeOf(i)
 	name := rt.String()
+	if _, has := name2Type[name]; has {
+		return
+	}
 	gotiny.RegisterName(name, rt)
 	name2Type[name] = rt
 }
@@ -352,7 +355,7 @@ func GetKnownMessageTypes() []string {
 
 // GetRegisteredTypeByName returns a reflect.Type if it has been registered
 func GetRegisteredTypeByName(name string) reflect.Type {
-	if rt, ok := name2Type[name]; ok {
+	if rt, has := name2Type[name]; has {
 		return rt
 	}
 	return nil
