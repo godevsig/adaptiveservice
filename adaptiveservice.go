@@ -340,6 +340,15 @@ func RegisterTypeNoPanic(i interface{}) (err error) {
 	return
 }
 
+// GetAllMessageTypes returns all registered types
+func GetAllMessageTypes() []string {
+	var registered []string
+	for name := range name2Type {
+		registered = append(registered, name)
+	}
+	return registered
+}
+
 // GetKnownMessageTypes returns all KnownMessage types
 func GetKnownMessageTypes() []string {
 	var registered []string
